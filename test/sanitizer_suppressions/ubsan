@@ -20,6 +20,7 @@ unsigned-integer-overflow:FuzzedDataProvider.h
 unsigned-integer-overflow:leveldb/
 unsigned-integer-overflow:minisketch/
 unsigned-integer-overflow:test/fuzz/crypto_diff_fuzz_chacha20.cpp
+unsigned-integer-overflow:test/fuzz/crypto_diff_fuzz_poly1305.cpp
 implicit-integer-sign-change:*/include/boost/
 implicit-integer-sign-change:*/include/c++/
 implicit-integer-sign-change:*/new_allocator.h
@@ -31,12 +32,14 @@ implicit-signed-integer-truncation:leveldb/
 implicit-unsigned-integer-truncation:*/include/c++/
 implicit-unsigned-integer-truncation:leveldb/
 implicit-unsigned-integer-truncation:test/fuzz/crypto_diff_fuzz_chacha20.cpp
+implicit-unsigned-integer-truncation:test/fuzz/crypto_diff_fuzz_poly1305.cpp
 # std::variant warning fixed in https://github.com/gcc-mirror/gcc/commit/074436cf8cdd2a9ce75cadd36deb8301f00e55b9
 implicit-unsigned-integer-truncation:std::__detail::__variant::_Variant_storage
 shift-base:*/include/c++/
 shift-base:leveldb/
 shift-base:minisketch/
 shift-base:test/fuzz/crypto_diff_fuzz_chacha20.cpp
+shift-base:test/fuzz/crypto_diff_fuzz_poly1305.cpp
 # Unsigned integer overflow occurs when the result of an unsigned integer
 # computation cannot be represented in its type. Unlike signed integer overflow,
 # this is not undefined behavior, but it is often unintentional. The list below
