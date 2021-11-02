@@ -156,6 +156,8 @@ public:
 
     //! Load private key and check that public key matches.
     bool Load(const CPrivKey& privkey, const CPubKey& vchPubKey, bool fSkipCheck);
+
+    std::optional<EllSwiftPubKey> EllSwiftEncode() const;
 };
 
 struct CExtKey {

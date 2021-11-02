@@ -11,6 +11,7 @@
 #include <random.h>
 
 #include <secp256k1.h>
+#include <secp256k1_ellswift.h>
 #include <secp256k1_extrakeys.h>
 #include <secp256k1_recovery.h>
 #include <secp256k1_schnorrsig.h>
@@ -330,6 +331,17 @@ bool CKey::Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const
     keyChild.fCompressed = true;
     keyChild.fValid = ret;
     return ret;
+}
+
+std::optional<EllSwiftPubKey> CKey::EllSwiftEncode() const
+{
+    EllSwiftPubKey encoded_pubkey;
+    if (!secp256k1_ellswift_create(secp256k1_context_sign,
+                                   reinterpret_cast<unsigned char*>(encoded_pubkey.data()),
+                                   keydata.data(), nullptr)) {
+        return {};
+    }
+    return encoded_pubkey;
 }
 
 bool CExtKey::Derive(CExtKey &out, unsigned int _nChild) const {
