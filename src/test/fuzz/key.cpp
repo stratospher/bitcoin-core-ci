@@ -16,9 +16,11 @@
 #include <script/signingprovider.h>
 #include <script/standard.h>
 #include <streams.h>
+#include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <util/strencodings.h>
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <numeric>
@@ -303,4 +305,15 @@ FUZZ_TARGET_INIT(key, initialize_key)
             assert(key == loaded_key);
         }
     }
+}
+
+FUZZ_TARGET_INIT(ellswift, initialize_key)
+{
+    FuzzedDataProvider fdp{buffer.data(), buffer.size()};
+    auto key_bytes = fdp.ConsumeBytes<uint8_t>(32);
+    key_bytes.resize(32);
+    CKey key;
+    key.Set(key_bytes.begin(), key_bytes.end(), fdp.ConsumeBool());
+
+    (void)key.EllSwiftEncode();
 }
