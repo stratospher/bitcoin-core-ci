@@ -15,17 +15,19 @@
 #include <clientversion.h>
 #include <compat/compat.h>
 #include <consensus/consensus.h>
+#include <crypto/hkdf_sha256_32.h>
 #include <crypto/sha256.h>
-#include <node/eviction.h>
 #include <fs.h>
 #include <i2p.h>
 #include <net_permissions.h>
 #include <netaddress.h>
 #include <netbase.h>
+#include <node/eviction.h>
 #include <node/interface_ui.h>
 #include <protocol.h>
 #include <random.h>
 #include <scheduler.h>
+#include <support/cleanse.h>
 #include <util/sock.h>
 #include <util/strencodings.h>
 #include <util/syscall_sandbox.h>
@@ -431,6 +433,35 @@ static CAddress GetBindAddress(const Sock& sock)
         }
     }
     return addr_bind;
+}
+
+void DeriveBIP324Session(ECDHSecret&& ecdh_secret, BIP324Session& session)
+{
+    std::string salt{"bitcoin_v2_shared_secret"};
+    salt += std::string{reinterpret_cast<const char*>(Params().MessageStart()), CMessageHeader::MESSAGE_START_SIZE};
+
+    CHKDF_HMAC_SHA256_L32 hkdf(reinterpret_cast<const unsigned char*>(ecdh_secret.data()), ecdh_secret.size(), salt);
+
+    hkdf.Expand32("initiator_L", reinterpret_cast<unsigned char*>(session.initiator_L.data()));
+    hkdf.Expand32("initiator_P", reinterpret_cast<unsigned char*>(session.initiator_P.data()));
+    hkdf.Expand32("responder_L", reinterpret_cast<unsigned char*>(session.responder_L.data()));
+    hkdf.Expand32("responder_P", reinterpret_cast<unsigned char*>(session.responder_P.data()));
+    hkdf.Expand32("session_id", reinterpret_cast<unsigned char*>(session.session_id.data()));
+
+    unsigned char hkdf_32_okm[32];
+    hkdf.Expand32("rekey_salt", hkdf_32_okm);
+    memcpy(session.rekey_salt.data(), hkdf_32_okm, BIP324_REKEY_SALT_LEN);
+
+    hkdf.Expand32("garbage_terminators", hkdf_32_okm);
+    memcpy(session.initiator_garbage_terminator.data(),
+           hkdf_32_okm,
+           BIP324_GARBAGE_TERMINATOR_LEN);
+    memcpy(session.responder_garbage_terminator.data(),
+           hkdf_32_okm + BIP324_GARBAGE_TERMINATOR_LEN,
+           BIP324_GARBAGE_TERMINATOR_LEN);
+
+    memory_cleanse(hkdf_32_okm, 32);
+    memory_cleanse(ecdh_secret.data(), ecdh_secret.size());
 }
 
 CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, ConnectionType conn_type)
