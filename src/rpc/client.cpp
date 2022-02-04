@@ -220,6 +220,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "addpeeraddress", 2, "tried"},
     { "stop", 0, "wait" },
     { "addnode", 2, "p2p_v2" },
+    { "addconnection", 2, "p2p_v2" },
 };
 // clang-format on
 

@@ -1397,7 +1397,7 @@ void CConnman::CreateNodeFromAcceptedSocket(std::unique_ptr<Sock>&& sock,
     RandAddEvent((uint32_t)id);
 }
 
-bool CConnman::AddConnection(const std::string& address, ConnectionType conn_type)
+bool CConnman::AddConnection(const std::string& address, ConnectionType conn_type, const bool use_p2p_v2)
 {
     AssertLockNotHeld(m_unused_i2p_sessions_mutex);
     AssertLockNotHeld(m_total_bytes_sent_mutex);
@@ -1431,7 +1431,11 @@ bool CConnman::AddConnection(const std::string& address, ConnectionType conn_typ
     CSemaphoreGrant grant(*semOutbound, true);
     if (!grant) return false;
 
-    OpenNetworkConnection(CAddress(), false, &grant, address.c_str(), conn_type);
+    CAddress addr(CService(), NODE_NONE);
+    if (use_p2p_v2) {
+        addr.nServices = ServiceFlags(addr.nServices | NODE_P2P_V2);
+    }
+    OpenNetworkConnection(addr, false, &grant, address.c_str(), conn_type);
     return true;
 }
 

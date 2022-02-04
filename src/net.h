@@ -969,13 +969,14 @@ public:
      * @param[in]   address     Address of node to try connecting to
      * @param[in]   conn_type   ConnectionType::OUTBOUND, ConnectionType::BLOCK_RELAY,
      *                          ConnectionType::ADDR_FETCH or ConnectionType::FEELER
+     * @param[in]   use_p2p_v2  Set to true if node supports BIP324 v2 transport protocol
      * @return      bool        Returns false if there are no available
      *                          slots for this connection:
      *                          - conn_type not a supported ConnectionType
      *                          - Max total outbound connection capacity filled
      *                          - Max connection capacity for type is filled
      */
-    bool AddConnection(const std::string& address, ConnectionType conn_type) EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex, !m_total_bytes_sent_mutex);
+    bool AddConnection(const std::string& address, ConnectionType conn_type, const bool use_p2p_v2) EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
 
     size_t GetNodeCount(ConnectionDirection) const;
     void GetNodeStats(std::vector<CNodeStats>& vstats) const;
