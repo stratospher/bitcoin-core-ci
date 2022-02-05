@@ -239,12 +239,48 @@ class P2PConnection(asyncio.Protocol):
         self.recvbuf = b""
         self.on_close()
 
+    # v2 handshake method
+    def v2_handshake(self):
+        """v2 handshake performed before P2P messages are exchanged(see BIP 324)"""
+        if not self.v2_connection.peer:
+            # perform v2 handshake
+            length = 0
+            if not self.v2_connection.initiating and not self.v2_connection.sent_garbage:
+                response = self.v2_connection.respond_v2_handshake(BytesIO(self.recvbuf))
+                length = len(self.v2_connection.received_prefix)
+                if response == -1:
+                    self.support_v2_p2p = False
+                    self.v2_connection = None
+                    return
+                elif response:
+                    self.send_raw_message(response)
+            if len(self.recvbuf) < 64:
+                return
+            # send garbage terminator + authentication packet + version packet
+            response = self.v2_connection.complete_handshake(BytesIO(self.recvbuf[length:]))
+            self.send_raw_message(response)
+            self.recvbuf = self.recvbuf[64:]
+
+        if self.v2_connection.peer:
+            # authenticate v2 handshake
+            if len(self.recvbuf) < 16+20+20:
+                return
+            is_mac_auth = self.v2_connection.authenticate_handshake(self.recvbuf)
+            if not is_mac_auth:
+                raise ValueError("invalid v2 mac tag in handshake authentication")
+            self.recvbuf = self.recvbuf[16+20+20:]
+            while self.queue_messages:
+                message = self.queue_messages.pop(0)
+                self.send_message(message)
+
     # Socket read methods
 
     def data_received(self, t):
         """asyncio callback when data is read from the socket."""
         if len(t) > 0:
             self.recvbuf += t
+            if self.support_v2_p2p and not self.v2_connection.tried_v2_handshake:
+                self.v2_handshake()
             self._on_data()
 
     def _on_data(self):
