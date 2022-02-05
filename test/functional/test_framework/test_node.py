@@ -24,7 +24,8 @@ from pathlib import Path
 
 from .authproxy import JSONRPCException
 from .descriptors import descsum_create
-from .p2p import P2P_SUBVERSION
+from .messages import NODE_P2P_V2
+from .p2p import P2P_SERVICES, P2P_SUBVERSION
 from .util import (
     MAX_NODES,
     assert_equal,
@@ -588,7 +589,7 @@ class TestNode():
                     assert_msg += "with expected error " + expected_msg
                 self._raise_assertion_error(assert_msg)
 
-    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, **kwargs):
+    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, support_v2_p2p=False, **kwargs):
         """Add an inbound p2p connection to the node.
 
         This method adds the p2p connection to the self.p2ps list and also
@@ -598,7 +599,15 @@ class TestNode():
         if 'dstaddr' not in kwargs:
             kwargs['dstaddr'] = '127.0.0.1'
 
-        p2p_conn.peer_connect(**kwargs, net=self.chain, timeout_factor=self.timeout_factor)()
+        # condition check is changed in later commit to allow false advertisement - assume both TestNode and P2PConnection is v2 for now
+        if self.is_v2_p2p and support_v2_p2p:
+            if 'services' not in kwargs:
+                kwargs['services'] = P2P_SERVICES|NODE_P2P_V2
+            else:
+                kwargs['services'] = kwargs['services']|NODE_P2P_V2
+            p2p_conn.peer_connect(**kwargs, net=self.chain, timeout_factor=self.timeout_factor, support_v2_p2p=support_v2_p2p)()
+        else:
+            p2p_conn.peer_connect(**kwargs, net=self.chain, timeout_factor=self.timeout_factor)()
         self.p2ps.append(p2p_conn)
         p2p_conn.wait_until(lambda: p2p_conn.is_connected, check_connected=False)
         if wait_for_verack:
@@ -623,7 +632,7 @@ class TestNode():
 
         return p2p_conn
 
-    def add_outbound_p2p_connection(self, p2p_conn, *, wait_for_verack=True, p2p_idx, connection_type="outbound-full-relay", **kwargs):
+    def add_outbound_p2p_connection(self, p2p_conn, *, wait_for_verack=True, p2p_idx, connection_type="outbound-full-relay", support_v2_p2p=False, **kwargs):
         """Add an outbound p2p connection from node. Must be an
         "outbound-full-relay", "block-relay-only", "addr-fetch" or "feeler" connection.
 
@@ -633,9 +642,17 @@ class TestNode():
 
         def addconnection_callback(address, port):
             self.log.debug("Connecting to %s:%d %s" % (address, port, connection_type))
-            self.addconnection('%s:%d' % (address, port), connection_type)
+            self.addconnection('%s:%d' % (address, port), connection_type, self.is_v2_p2p and support_v2_p2p)
 
-        p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, **kwargs)()
+        # condition check is changed in later commit to allow false advertisement - assume both TestNode and P2PConnection is v2 for now
+        if self.is_v2_p2p and support_v2_p2p:
+            if 'services' not in kwargs:
+                kwargs['services'] = P2P_SERVICES|NODE_P2P_V2
+            else:
+                kwargs['services'] = kwargs['services']|NODE_P2P_V2
+            p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, support_v2_p2p=support_v2_p2p, **kwargs)()
+        else:
+            p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, **kwargs)()
 
         if connection_type == "feeler":
             # feeler connections are closed as soon as the node receives a `version` message
