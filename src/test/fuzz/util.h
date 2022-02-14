@@ -341,6 +341,8 @@ inline std::unique_ptr<CNode> ConsumeNodeAsUniquePtr(FuzzedDataProvider& fdp, co
 
 void FillNode(FuzzedDataProvider& fuzzed_data_provider, ConnmanTestMsg& connman, CNode& node) noexcept EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
 
+void InitTestV2P2P(FuzzedDataProvider& fuzzed_data_provider, CNode& p2p_node, ConnmanTestMsg& connman) noexcept;
+
 class FuzzedFileProvider
 {
     FuzzedDataProvider& m_fuzzed_data_provider;
