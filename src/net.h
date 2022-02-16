@@ -1047,6 +1047,8 @@ private:
     void NotifyNumConnectionsChanged();
     /** Return true if the peer is inactive and should be disconnected. */
     bool InactivityCheck(const CNode& node) const;
+    void DowngradeToV1Transport(CNode& node)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex);
 
     /**
      * Generate a collection of sockets to check for IO readiness.
