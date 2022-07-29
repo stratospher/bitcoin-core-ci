@@ -289,6 +289,7 @@ private:
     CDataStream vRecv;              // received message data
     unsigned int nHdrPos;
     unsigned int nDataPos;
+    uint8_t validated_magic_len{0};
 
     const uint256& GetMessageHash() const;
     int readHeader(Span<const uint8_t> msg_bytes);
@@ -527,6 +528,8 @@ public:
     std::atomic_bool fPauseRecv{false};
     std::atomic_bool fPauseSend{false};
     std::atomic_bool v2_key_exchange_complete{false};
+    std::atomic_bool m_authenticated_v2_garbage{false};
+    bool v2_garbage_terminated{false};
 
     bool IsOutboundOrBlockRelayConn() const {
         switch (m_conn_type) {
@@ -638,6 +641,7 @@ public:
     std::atomic<std::chrono::microseconds> m_min_ping_time{std::chrono::microseconds::max()};
 
     EllSwiftPubKey ellswift_pubkey;
+    std::vector<std::byte> peer_ellswift_buf;
 
     CNode(NodeId id,
           std::shared_ptr<Sock> sock,
@@ -726,6 +730,10 @@ private:
 
     std::list<CNetMessage> vRecvMsg; // Used only by SocketHandler thread
     CKey v2_priv_key;
+    std::array<std::byte, BIP324_GARBAGE_TERMINATOR_LEN> v2_sent_garbage_terminator;
+    std::array<std::byte, BIP324_GARBAGE_TERMINATOR_LEN> v2_recv_garbage_terminator;
+    std::vector<std::byte> v2_garbage_bytes_recd;
+    bool v2_keys_derived{false};
 
     // Our address, as reported by the peer
     CService addrLocal GUARDED_BY(m_addr_local_mutex);
@@ -886,6 +894,7 @@ public:
 
     void PushMessage(CNode* pnode, CSerializedNetMsg&& msg) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex);
     void PushV2EllSwiftPubkey(CNode* pnode) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex);
+    void PushV2GarbageTerminator(CNode* pnode);
 
     using NodeFn = std::function<void(CNode*)>;
     void ForEachNode(const NodeFn& func)
