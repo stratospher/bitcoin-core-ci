@@ -833,7 +833,7 @@ BOOST_AUTO_TEST_CASE(hkdf_hmac_sha256_l32_tests)
                 "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d");
 }
 
-static void TestBIP324CipherSuite(const std::string& hex_contents, const std::string& hex_key_L, const std::string& hex_key_P, const std::string& hex_rekey_salt, const std::string& hex_expected_output_seq_0, const std::string& hex_expected_output_seq_999)
+static void TestBIP324CipherSuite(const std::string& hex_aad, const std::string& hex_contents, const std::string& hex_key_L, const std::string& hex_key_P, const std::string& hex_rekey_salt, const std::string& hex_expected_output_seq_0, const std::string& hex_expected_output_seq_999)
 {
     auto key_L_vec = ParseHex(hex_key_L);
     BIP324Key key_L;
@@ -846,6 +846,8 @@ static void TestBIP324CipherSuite(const std::string& hex_contents, const std::st
     auto rekey_salt_vec = ParseHex(hex_rekey_salt);
     std::array<std::byte, BIP324_REKEY_SALT_LEN> rekey_salt;
     memcpy(rekey_salt.data(), rekey_salt_vec.data(), BIP324_REKEY_SALT_LEN);
+
+    auto aad = ParseHex(hex_aad);
 
     const auto original_contents_bytes = ParseHex(hex_contents);
     auto contents_buf = original_contents_bytes;
@@ -863,7 +865,7 @@ static void TestBIP324CipherSuite(const std::string& hex_contents, const std::st
     // encrypt / decrypt the packet 1000 times
     for (size_t i = 0; i < 1000; ++i) {
         // encrypt
-        auto res = suite_enc.Crypt(MakeByteSpan(contents_buf), MakeWritableByteSpan(encrypted_pkt), flags, true);
+        auto res = suite_enc.Crypt(MakeByteSpan(aad), MakeByteSpan(contents_buf), MakeWritableByteSpan(encrypted_pkt), flags, true);
         BOOST_CHECK(res);
         // verify ciphertext & mac against the test vector
         if (i == 0) {
@@ -876,7 +878,7 @@ static void TestBIP324CipherSuite(const std::string& hex_contents, const std::st
         out_len = suite_dec.DecryptLength(encrypted_pkt_len);
         BOOST_CHECK_EQUAL(out_len, contents_buf.size());
 
-        res = suite_dec.Crypt({reinterpret_cast<std::byte*>(encrypted_pkt.data()) + BIP324_LENGTH_FIELD_LEN, encrypted_pkt.size() - BIP324_LENGTH_FIELD_LEN}, MakeWritableByteSpan(contents_buf_dec), flags, false);
+        res = suite_dec.Crypt(MakeByteSpan(aad), {reinterpret_cast<std::byte*>(encrypted_pkt.data()) + BIP324_LENGTH_FIELD_LEN, encrypted_pkt.size() - BIP324_LENGTH_FIELD_LEN}, MakeWritableByteSpan(contents_buf_dec), flags, false);
         BOOST_CHECK(res);
         BOOST_CHECK_EQUAL(flags, BIP324_NONE);
 
@@ -894,33 +896,46 @@ BOOST_AUTO_TEST_CASE(bip324_cipher_suite_testvectors)
 
     // encrypting an empty message should result in 20 bytes:
     // 3 bytes of encrypted length, 1 byte header and 16 bytes MAC
-    TestBIP324CipherSuite(/* plaintext */ "",
+    TestBIP324CipherSuite(/* aad */ "",
+                          /* plaintext */ "",
                           /* k_l */ "0000000000000000000000000000000000000000000000000000000000000000",
                           /* k_p */ "0000000000000000000000000000000000000000000000000000000000000000",
                           /* rekey_salt */ "0000000000000000000000000000000000000000000000",
                           /* ciphertext_and_mac_0 */ "76b8e09fbedcfd1809ff3c10adf8277fcc0581b8",
                           /* ciphertext_and_mac_999 */ "66712b97e33e72c0e908f5a7ce99279cb3cb6769");
 
-    TestBIP324CipherSuite("0000000000000000000000000000000000000000000000000000000000000000",
+    TestBIP324CipherSuite("",
+                          "0000000000000000000000000000000000000000000000000000000000000000",
                           "0000000000000000000000000000000000000000000000000000000000000000",
                           "0000000000000000000000000000000000000000000000000000000000000000",
                           "0000000000000000000000000000000000000000000000",
                           "56b8e09f07e7be5551387a98ba977c732d080dcb0f29a048e3656912c6533e32ee7aed29e7e38bb44c94b6a43c525ffca66c79e9",
                           "46712b9741ee5bde86518fee0ce0778aa97cf58c1ee3c587ab3dce47de77b25f202b4807e074989c86c4bb8493e76cda937e0aad");
 
-    TestBIP324CipherSuite("0100000000000000000000000000000000000000000000000000000000000000",
+    TestBIP324CipherSuite("",
+                          "0100000000000000000000000000000000000000000000000000000000000000",
                           "0000000000000000000000000000000000000000000000000000000000000000",
                           "0000000000000000000000000000000000000000000000000000000000000000",
                           "0000000000000000000000000000000000000000000000",
                           "56b8e09f06e7be5551387a98ba977c732d080dcb0f29a048e3656912c6533e32ee7aed2929449b86c1e4e213676824f2c48e5336",
                           "46712b9740ee5bde86518fee0ce0778aa97cf58c1ee3c587ab3dce47de77b25f202b48079f2cc4249bd112ea04cccf99a211dfdb");
 
-    TestBIP324CipherSuite("fc0000f195e66982105ffb640bb7757f579da31602fc93ec01ac56f85ac3c134a4547b733b46413042c9440049176905d3be59ea1c53f15916155c2be8241a38008b9a26bc35941e2444177c8ade6689de95264986d95889fb60e84629c9bd9a5acb1cc118be563eb9b3a4a472f82e09a7e778492b562ef7130e88dfe031c79db9d4f7c7a899151b9a475032b63fc385245fe054e3dd5a97a5f576fe064025d3ce042c566ab2c507b138db853e3d6959660996546cc9c4a6eafdc777c040d70eaf46f76dad3979e5c5360c3317166a1c894c94a371876a94df7628fe4eaaf2ccb27d5aaae0ad7ad0f9d4b6ad3b54098746d4524d38407a6deb3ab78fab78c9",
+    TestBIP324CipherSuite("",
+                          "fc0000f195e66982105ffb640bb7757f579da31602fc93ec01ac56f85ac3c134a4547b733b46413042c9440049176905d3be59ea1c53f15916155c2be8241a38008b9a26bc35941e2444177c8ade6689de95264986d95889fb60e84629c9bd9a5acb1cc118be563eb9b3a4a472f82e09a7e778492b562ef7130e88dfe031c79db9d4f7c7a899151b9a475032b63fc385245fe054e3dd5a97a5f576fe064025d3ce042c566ab2c507b138db853e3d6959660996546cc9c4a6eafdc777c040d70eaf46f76dad3979e5c5360c3317166a1c894c94a371876a94df7628fe4eaaf2ccb27d5aaae0ad7ad0f9d4b6ad3b54098746d4524d38407a6deb3ab78fab78c9",
                           "ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
                           "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
                           "6f5ef19ed6f1a5e2db2b119494f21d8c2de638a4c6ec3b",
                           "3940c1184442315c7340b89171039acb48f95287e66e56f7afa7cf00f95044d26fb69d46ac5c16a2d57a1cadc39160644717559e73480734410a3f543c5f231a7d7ed77af2a64681f6a7417283cef85504ac5de9fdea100e6c67ef7a1bfcd888a92a5f1ef2c9074b44b572aa748f29ff61a850ce40470004dff5cc1d926c5abe25ace47a12c5373094a26bab027e008154fb630aa062490b5421e96691a3f79557f7a79e3cfd9100796671ea241703ddf326f113adf1694bbd6e0ca032e16f936e7bfbf174e7ef4af5b53a6a9102e6fa41a8e589290f39a7bc7a6003088c612a43a36c2e9f2e740797ad3a2a1a80e0f67157fb9abc40487077368e94751a266a0b2dac24f0adabd5c6d7ba54316eee951da560",
                           "bcc270293211abbeac7a26af3f3d200f8ce44de3d3e86cdbf449dcf7fedb7b5a489629deaae0c87471b1331b2fce7aba3dfabf6f1867e1a534cececba0cdc9e6150e92cb145567401f08778eeb646b2a70165061423b30ca21e754d3e0a0db4de59dd74093b0fc0fc78a598d522571525ab172592620f770b3303c65ee4a35504e4991e8f1d8904c9679824140642c70a184b4449d1ffdf11b8bee4e831a5b3d986006f5119a0912bacb939886abcb279be2437ecbf1f56528ef397f6459f0fd895031c7a8a2a815a3e68199dc1a9b0c7fef3df72c470f9e8e5524049e7e712da407a6b8ab9a3c0a4ae40cc187952b1062e646b8aebc2808a381530791e46b7220a1af222022952872decc6ad5fad2a7b242a7");
+
+    // Repeat test with non-empty aad - only mac tags (last 16 bytes) in the expected outputs change
+    TestBIP324CipherSuite("c6d7bc3a5079ae98fec7094bdfb42aac61d3ba64af179d672c7c33fd4a139647",
+                          "fc0000f195e66982105ffb640bb7757f579da31602fc93ec01ac56f85ac3c134a4547b733b46413042c9440049176905d3be59ea1c53f15916155c2be8241a38008b9a26bc35941e2444177c8ade6689de95264986d95889fb60e84629c9bd9a5acb1cc118be563eb9b3a4a472f82e09a7e778492b562ef7130e88dfe031c79db9d4f7c7a899151b9a475032b63fc385245fe054e3dd5a97a5f576fe064025d3ce042c566ab2c507b138db853e3d6959660996546cc9c4a6eafdc777c040d70eaf46f76dad3979e5c5360c3317166a1c894c94a371876a94df7628fe4eaaf2ccb27d5aaae0ad7ad0f9d4b6ad3b54098746d4524d38407a6deb3ab78fab78c9",
+                          "ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+                          "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+                          "6f5ef19ed6f1a5e2db2b119494f21d8c2de638a4c6ec3b5b4d43f3196152ea10",
+                          "3940c1184442315c7340b89171039acb48f95287e66e56f7afa7cf00f95044d26fb69d46ac5c16a2d57a1cadc39160644717559e73480734410a3f543c5f231a7d7ed77af2a64681f6a7417283cef85504ac5de9fdea100e6c67ef7a1bfcd888a92a5f1ef2c9074b44b572aa748f29ff61a850ce40470004dff5cc1d926c5abe25ace47a12c5373094a26bab027e008154fb630aa062490b5421e96691a3f79557f7a79e3cfd9100796671ea241703ddf326f113adf1694bbd6e0ca032e16f936e7bfbf174e7ef4af5b53a6a9102e6fa41a8e589290f39a7bc7a6003088c612a43a36c2e9f2e740797ad3a2a1a80e0f67157fb9abc40487077368e94751a266a0b2dac4d382097b958da569f3b6fae3faaaaf2",
+                          "bcc270293211abbeac7a26af3f3d200f8ce44de3d3e86cdbf449dcf7fedb7b5a489629deaae0c87471b1331b2fce7aba3dfabf6f1867e1a534cececba0cdc9e6150e92cb145567401f08778eeb646b2a70165061423b30ca21e754d3e0a0db4de59dd74093b0fc0fc78a598d522571525ab172592620f770b3303c65ee4a35504e4991e8f1d8904c9679824140642c70a184b4449d1ffdf11b8bee4e831a5b3d986006f5119a0912bacb939886abcb279be2437ecbf1f56528ef397f6459f0fd895031c7a8a2a815a3e68199dc1a9b0c7fef3df72c470f9e8e5524049e7e712da407a6b8ab9a3c0a4ae40cc187952b1062e646b8aebc2808a381530791e46b7220a1afd31f9f544f9ae60720005dca1ded9ac6");
 }
 
 BOOST_AUTO_TEST_CASE(countbits_tests)
