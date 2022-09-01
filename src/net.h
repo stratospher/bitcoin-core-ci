@@ -125,6 +125,7 @@ struct CSerializedNetMsg {
     }
 
     std::vector<unsigned char> data;
+    std::vector<std::byte> aad; // associated authenticated data for encrypted BIP324 (v2) transport
     std::string m_type;
 };
 
@@ -260,7 +261,10 @@ public:
     /** read and deserialize data, advances msg_bytes data pointer */
     virtual int Read(Span<const uint8_t>& msg_bytes) = 0;
     // decomposes a message from the context
-    virtual CNetMessage GetMessage(std::chrono::microseconds time, bool& reject_message, bool& disconnect) = 0;
+    virtual CNetMessage GetMessage(std::chrono::microseconds time,
+                                   bool& reject_message,
+                                   bool& disconnect,
+                                   Span<const std::byte> aad) = 0;
     virtual ~TransportDeserializer() {}
 };
 
@@ -324,7 +328,10 @@ public:
         }
         return ret;
     }
-    CNetMessage GetMessage(std::chrono::microseconds time, bool& reject_message, bool& disconnect) override;
+    CNetMessage GetMessage(std::chrono::microseconds time,
+                           bool& reject_message,
+                           bool& disconnect,
+                           Span<const std::byte> aad) override;
 };
 
 /** V2TransportDeserializer is a transport deserializer after BIP324 */
@@ -383,7 +390,10 @@ public:
         }
         return ret;
     }
-    CNetMessage GetMessage(const std::chrono::microseconds time, bool& reject_message, bool& disconnect) override;
+    CNetMessage GetMessage(const std::chrono::microseconds time,
+                           bool& reject_message,
+                           bool& disconnect,
+                           Span<const std::byte> aad) override;
 };
 
 /** The TransportSerializer prepares messages for the network transport
