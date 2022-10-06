@@ -25,6 +25,23 @@ def TaggedHash(tag, data):
     ss += data
     return hashlib.sha256(ss).digest()
 
+# HKDF-SHA256
+def hmac_sha256(key, data):
+    """Compute HMAC-SHA256 from specified byte arrays key and data."""
+    return hmac.new(key, data, hashlib.sha256).digest()
+
+def hkdf_sha256(length, ikm, salt, info):
+    """Derive a key using HKDF-SHA256."""
+    if len(salt) == 0:
+        salt = bytes([0] * 32)
+    prk = hmac_sha256(salt, ikm)
+    t = b""
+    okm = b""
+    for i in range((length + 32 - 1) // 32):
+        t = hmac_sha256(prk, t + info + bytes([i + 1]))
+        okm += t
+    return okm[:length]
+
 class FE:
     """Objects of this class represent elements of the field GF(2**256 - 2**32 - 977).
 
