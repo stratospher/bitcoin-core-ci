@@ -69,9 +69,9 @@ TEST_EXIT_SKIPPED = 77
 
 TEST_FRAMEWORK_MODULES = [
     "address",
+    "bip324_cipher",
     "blocktools",
     "chacha20",
-    "chacha20_poly1305_aead",
     "ellswift",
     "key",
     "muhash",
