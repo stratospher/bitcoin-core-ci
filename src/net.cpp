@@ -688,6 +688,7 @@ void CNode::CopyStats(CNodeStats& stats)
     stats.addrLocal = addrLocalUnlocked.IsValid() ? addrLocalUnlocked.ToString() : "";
 
     X(m_conn_type);
+    X(m_transport_type);
 }
 #undef X
 
@@ -766,7 +767,7 @@ bool CNode::ReceiveMsgBytes(Span<const uint8_t> msg_bytes, bool& complete)
             // to talk v1 or v2. if the first message is not VERSION, we reinterpret the
             // bytes as v2 ellswift
             if (gArgs.GetBoolArg("-v2transport", DEFAULT_V2_TRANSPORT) &&
-                !m_prefer_p2p_v2 && IsInboundConn() &&
+                m_transport_type == TransportProtocolType::V1 && IsInboundConn() &&
                 mapRecvBytesPerMsgType.at(NetMsgType::VERSION) == 0 &&
                 msg.m_type != NetMsgType::VERSION) {
                 return false;
@@ -1333,6 +1334,7 @@ void CConnman::CreateNodeFromAcceptedSocket(std::unique_ptr<Sock>&& sock,
                                .prefer_evict = discouraged,
                              },
                              /*prefer_p2p_v2*/ false);
+    pnode->m_transport_type = TransportProtocolType::V1;
     pnode->AddRef();
     m_msgproc->InitializeNode(*pnode, nodeServices);
 
@@ -1641,6 +1643,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
                                 PushV2EllSwiftPubkey(pnode);
                                 // We now know the peer prefers a BIP324 v2 connection
                                 pnode->m_prefer_p2p_v2 = true;
+                                pnode->m_transport_type = TransportProtocolType::V2;
                             }
 
                             // Keys are not derived because we don't have the peer ellswift yet, keep buffering.
@@ -1709,6 +1712,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
                                 pnode->CloseSocketDisconnect();
                             } else {
                                 pnode->v2_key_exchange_complete = true;
+                                pnode->m_transport_type = TransportProtocolType::V2;
                                 if (!pnode->IsInboundConn()) {
                                     // Outbound peer has completed key exchange and can start the P2P protocol
                                     m_msgproc->InitP2P(*pnode, nLocalServices);
@@ -2422,6 +2426,9 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
     // Only the outbound peer knows that both sides support BIP324 transport
     if (pnode->PreferV2Conn()) {
         PushV2EllSwiftPubkey(pnode);
+        pnode->m_transport_type = TransportProtocolType::V2;
+    } else {
+        pnode->m_transport_type = TransportProtocolType::V1;
     }
     m_msgproc->InitializeNode(*pnode, nLocalServices);
     {
@@ -3175,7 +3182,8 @@ CNode::CNode(NodeId idIn,
              ConnectionType conn_type_in,
              bool inbound_onion,
              CNodeOptions&& node_opts,
-             bool prefer_p2p_v2)
+             bool prefer_p2p_v2,
+             TransportProtocolType transport_type_in)
     : m_permission_flags{node_opts.permission_flags},
       m_sock{sock},
       m_connected{GetTime<std::chrono::seconds>()},
@@ -3185,6 +3193,7 @@ CNode::CNode(NodeId idIn,
       m_inbound_onion{inbound_onion},
       m_prefer_evict{node_opts.prefer_evict},
       nKeyedNetGroup{nKeyedNetGroupIn},
+      m_transport_type{transport_type_in},
       id{idIn},
       nLocalHostNonce{nLocalHostNonceIn},
       m_conn_type{conn_type_in},

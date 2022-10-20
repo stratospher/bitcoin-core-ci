@@ -233,6 +233,7 @@ public:
     Network m_network;
     uint32_t m_mapped_as;
     ConnectionType m_conn_type;
+    TransportProtocolType m_transport_type;
 };
 
 
@@ -527,6 +528,7 @@ public:
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
     std::atomic_bool fPauseSend{false};
+    TransportProtocolType m_transport_type;
     std::atomic_bool v2_key_exchange_complete{false};
     std::atomic_bool m_authenticated_v2_garbage{false};
     bool v2_garbage_terminated{false};
@@ -653,7 +655,8 @@ public:
           ConnectionType conn_type_in,
           bool inbound_onion,
           CNodeOptions&& node_opts = {},
-          bool prefer_p2p_v2 = false);
+          bool prefer_p2p_v2 = false,
+          TransportProtocolType transport_type_in = TransportProtocolType::V1);
     CNode(const CNode&) = delete;
     CNode& operator=(const CNode&) = delete;
 
