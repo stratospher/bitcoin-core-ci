@@ -234,6 +234,7 @@ public:
     uint32_t m_mapped_as;
     ConnectionType m_conn_type;
     TransportProtocolType m_transport_type;
+    std::string m_v2_session_id;
 };
 
 
@@ -759,6 +760,7 @@ private:
 
     // Peer prefers a BIP324(v2) p2p transport
     bool m_prefer_p2p_v2{false};
+    std::string m_v2_session_id;
 };
 
 /**
