@@ -47,47 +47,47 @@ const char *WTXIDRELAY="wtxidrelay";
 const char *SENDTXRCNCL="sendtxrcncl";
 } // namespace NetMsgType
 
-/** All known message types. Keep this in the same order as the list of
- * messages above and in protocol.h.
+/** All known message types including the short-ID (as initially defined in BIP324).
+ *  Keep this in the same order as the list of messages above and in protocol.h.
  */
-const static std::string allNetMessageTypes[] = {
-    NetMsgType::VERSION,
-    NetMsgType::VERACK,
-    NetMsgType::ADDR,
-    NetMsgType::ADDRV2,
-    NetMsgType::SENDADDRV2,
-    NetMsgType::INV,
-    NetMsgType::GETDATA,
-    NetMsgType::MERKLEBLOCK,
-    NetMsgType::GETBLOCKS,
-    NetMsgType::GETHEADERS,
-    NetMsgType::TX,
-    NetMsgType::HEADERS,
-    NetMsgType::BLOCK,
-    NetMsgType::GETADDR,
-    NetMsgType::MEMPOOL,
-    NetMsgType::PING,
-    NetMsgType::PONG,
-    NetMsgType::NOTFOUND,
-    NetMsgType::FILTERLOAD,
-    NetMsgType::FILTERADD,
-    NetMsgType::FILTERCLEAR,
-    NetMsgType::SENDHEADERS,
-    NetMsgType::FEEFILTER,
-    NetMsgType::SENDCMPCT,
-    NetMsgType::CMPCTBLOCK,
-    NetMsgType::GETBLOCKTXN,
-    NetMsgType::BLOCKTXN,
-    NetMsgType::GETCFILTERS,
-    NetMsgType::CFILTER,
-    NetMsgType::GETCFHEADERS,
-    NetMsgType::CFHEADERS,
-    NetMsgType::GETCFCHECKPT,
-    NetMsgType::CFCHECKPT,
-    NetMsgType::WTXIDRELAY,
-    NetMsgType::SENDTXRCNCL,
-};
-const static std::vector<std::string> allNetMessageTypesVec(std::begin(allNetMessageTypes), std::end(allNetMessageTypes));
+const static std::map<uint8_t, std::string> allNetMessageTypes = {
+    {37, NetMsgType::VERSION},
+    {36, NetMsgType::VERACK},
+    {13, NetMsgType::ADDR},
+    {45, NetMsgType::ADDRV2},
+    {46, NetMsgType::SENDADDRV2},
+    {27, NetMsgType::INV},
+    {24, NetMsgType::GETDATA},
+    {29, NetMsgType::MERKLEBLOCK},
+    {22, NetMsgType::GETBLOCKS},
+    {25, NetMsgType::GETHEADERS},
+    {35, NetMsgType::TX},
+    {26, NetMsgType::HEADERS},
+    {14, NetMsgType::BLOCK},
+    {21, NetMsgType::GETADDR},
+    {28, NetMsgType::MEMPOOL},
+    {31, NetMsgType::PING},
+    {32, NetMsgType::PONG},
+    {30, NetMsgType::NOTFOUND},
+    {20, NetMsgType::FILTERLOAD},
+    {18, NetMsgType::FILTERADD},
+    {19, NetMsgType::FILTERCLEAR},
+    {34, NetMsgType::SENDHEADERS},
+    {17, NetMsgType::FEEFILTER},
+    {33, NetMsgType::SENDCMPCT},
+    {16, NetMsgType::CMPCTBLOCK},
+    {23, NetMsgType::GETBLOCKTXN},
+    {15, NetMsgType::BLOCKTXN},
+    {38, NetMsgType::GETCFILTERS},
+    {39, NetMsgType::CFILTER},
+    {40, NetMsgType::GETCFHEADERS},
+    {41, NetMsgType::CFHEADERS},
+    {42, NetMsgType::GETCFCHECKPT},
+    {43, NetMsgType::CFCHECKPT},
+    {44, NetMsgType::WTXIDRELAY},
+    {47, NetMsgType::SENDTXRCNCL}};
+
+static std::map<std::string, uint8_t> msgTypeShortIDs;
 
 CMessageHeader::CMessageHeader(const MessageStartChars& pchMessageStartIn, const char* pszCommand, unsigned int nMessageSizeIn)
 {
@@ -178,9 +178,9 @@ std::string CInv::ToString() const
     }
 }
 
-const std::vector<std::string> &getAllNetMessageTypes()
+const std::map<uint8_t, std::string>& getAllNetMessageTypes()
 {
-    return allNetMessageTypesVec;
+    return allNetMessageTypes;
 }
 
 /**
@@ -221,4 +221,28 @@ GenTxid ToGenTxid(const CInv& inv)
 {
     assert(inv.IsGenTxMsg());
     return inv.IsMsgWtx() ? GenTxid::Wtxid(inv.hash) : GenTxid::Txid(inv.hash);
+}
+
+std::optional<uint8_t> GetShortIDFromMessageType(const std::string& message_type)
+{
+    if (msgTypeShortIDs.size() != allNetMessageTypes.size()) {
+        for (const std::pair<uint8_t, std::string> entry : allNetMessageTypes) {
+            msgTypeShortIDs[entry.second] = entry.first;
+        }
+    }
+
+    auto it = msgTypeShortIDs.find(message_type);
+    if (it != msgTypeShortIDs.end()) {
+        return it->second;
+    }
+    return {};
+}
+
+std::optional<std::string> GetMessageTypeFromShortID(const uint8_t shortID)
+{
+    auto it = allNetMessageTypes.find(shortID);
+    if (it != allNetMessageTypes.end()) {
+        return it->second;
+    }
+    return {};
 }
