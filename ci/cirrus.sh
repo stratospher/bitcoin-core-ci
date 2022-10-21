@@ -5,10 +5,20 @@ set -x
 
 export LC_ALL=C
 
+# Start persistent wineserver if necessary.
+# This speeds up jobs with many invocations of wine (e.g., ./configure with MSVC) tremendously.
+case "$WRAPPER_CMD" in
+    *wine*)
+        # This is apparently only reliable when we run a dummy command such as "hh.exe" afterwards.
+        wineserver -p && wine hh.exe
+        ;;
+esac
+
 env >> test_env.log
 
 $CC -v || true
 valgrind --version || true
+$WRAPPER_CMD --version || true
 
 ./autogen.sh
 
@@ -18,6 +28,7 @@ valgrind --version || true
     --with-ecmult-window="$ECMULTWINDOW" \
     --with-ecmult-gen-precision="$ECMULTGENPRECISION" \
     --enable-module-ecdh="$ECDH" --enable-module-recovery="$RECOVERY" \
+    --enable-module-ellswift="$ELLSWIFT" \
     --enable-module-schnorrsig="$SCHNORRSIG" \
     --enable-examples="$EXAMPLES" \
     --with-valgrind="$WITH_VALGRIND" \
@@ -62,6 +73,9 @@ then
     make clean-precomp
     make precomp
 fi
+
+# Shutdown wineserver again
+wineserver -k || true
 
 # Check that no repo files have been modified by the build.
 # (This fails for example if the precomp files need to be updated in the repo.)
