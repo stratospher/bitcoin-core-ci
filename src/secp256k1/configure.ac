@@ -33,12 +33,14 @@ AM_INIT_AUTOMAKE([1.11.2 foreign subdir-objects])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AC_PROG_CC
-if test x"$ac_cv_prog_cc_c89" = x"no"; then
-  AC_MSG_ERROR([c89 compiler support required])
-fi
 AM_PROG_AS
 AM_PROG_AR
 
+# Clear some cache variables as a workaround for a bug that appears due to a bad
+# interaction between AM_PROG_AR and LT_INIT when combining MSVC's archiver lib.exe.
+# https://debbugs.gnu.org/cgi/bugreport.cgi?bug=54421
+AS_UNSET(ac_cv_prog_AR)
+AS_UNSET(ac_cv_prog_ac_ct_AR)
 LT_INIT([win32-dll])
 
 build_windows=no
@@ -87,23 +89,35 @@ esac
 #
 # TODO We should analogously not touch CPPFLAGS and LDFLAGS but currently there are no issues.
 AC_DEFUN([SECP_TRY_APPEND_DEFAULT_CFLAGS], [
-    # Try to append -Werror=unknown-warning-option to CFLAGS temporarily. Otherwise clang will
-    # not error out if it gets unknown warning flags and the checks here will always succeed
-    # no matter if clang knows the flag or not.
-    SECP_TRY_APPEND_DEFAULT_CFLAGS_saved_CFLAGS="$CFLAGS"
-    SECP_TRY_APPEND_CFLAGS([-Werror=unknown-warning-option], CFLAGS)
+    # GCC and compatible (incl. clang)
+    if test "x$GCC" = "xyes"; then
+      # Try to append -Werror=unknown-warning-option to CFLAGS temporarily. Otherwise clang will
+      # not error out if it gets unknown warning flags and the checks here will always succeed
+      # no matter if clang knows the flag or not.
+      SECP_TRY_APPEND_DEFAULT_CFLAGS_saved_CFLAGS="$CFLAGS"
+      SECP_TRY_APPEND_CFLAGS([-Werror=unknown-warning-option], CFLAGS)
 
-    SECP_TRY_APPEND_CFLAGS([-std=c89 -pedantic -Wno-long-long -Wnested-externs -Wshadow -Wstrict-prototypes -Wundef], $1) # GCC >= 3.0, -Wlong-long is implied by -pedantic.
-    SECP_TRY_APPEND_CFLAGS([-Wno-overlength-strings], $1) # GCC >= 4.2, -Woverlength-strings is implied by -pedantic.
-    SECP_TRY_APPEND_CFLAGS([-Wall], $1) # GCC >= 2.95 and probably many other compilers
-    SECP_TRY_APPEND_CFLAGS([-Wno-unused-function], $1) # GCC >= 3.0, -Wunused-function is implied by -Wall.
-    SECP_TRY_APPEND_CFLAGS([-Wextra], $1) # GCC >= 3.4, this is the newer name of -W, which we don't use because older GCCs will warn about unused functions.
-    SECP_TRY_APPEND_CFLAGS([-Wcast-align], $1) # GCC >= 2.95
-    SECP_TRY_APPEND_CFLAGS([-Wcast-align=strict], $1) # GCC >= 8.0
-    SECP_TRY_APPEND_CFLAGS([-Wconditional-uninitialized], $1) # Clang >= 3.0 only
-    SECP_TRY_APPEND_CFLAGS([-fvisibility=hidden], $1) # GCC >= 4.0
+      SECP_TRY_APPEND_CFLAGS([-std=c89 -pedantic -Wno-long-long -Wnested-externs -Wshadow -Wstrict-prototypes -Wundef], $1) # GCC >= 3.0, -Wlong-long is implied by -pedantic.
+      SECP_TRY_APPEND_CFLAGS([-Wno-overlength-strings], $1) # GCC >= 4.2, -Woverlength-strings is implied by -pedantic.
+      SECP_TRY_APPEND_CFLAGS([-Wall], $1) # GCC >= 2.95 and probably many other compilers
+      SECP_TRY_APPEND_CFLAGS([-Wno-unused-function], $1) # GCC >= 3.0, -Wunused-function is implied by -Wall.
+      SECP_TRY_APPEND_CFLAGS([-Wextra], $1) # GCC >= 3.4, this is the newer name of -W, which we don't use because older GCCs will warn about unused functions.
+      SECP_TRY_APPEND_CFLAGS([-Wcast-align], $1) # GCC >= 2.95
+      SECP_TRY_APPEND_CFLAGS([-Wcast-align=strict], $1) # GCC >= 8.0
+      SECP_TRY_APPEND_CFLAGS([-Wconditional-uninitialized], $1) # Clang >= 3.0 only
+      SECP_TRY_APPEND_CFLAGS([-fvisibility=hidden], $1) # GCC >= 4.0
 
-    CFLAGS="$SECP_TRY_APPEND_DEFAULT_CFLAGS_saved_CFLAGS"
+      CFLAGS="$SECP_TRY_APPEND_DEFAULT_CFLAGS_saved_CFLAGS"
+    fi
+
+    # MSVC
+    # Assume MSVC if we're building for Windows but not with GCC or compatible;
+    # libtool makes the same assumption internally.
+    # Note that "/opt" and "-opt" are equivalent for MSVC; we use "-opt" because "/opt" looks like a path.
+    if test x"$GCC" != x"yes" && test x"$build_windows" = x"yes"; then
+      SECP_TRY_APPEND_CFLAGS([-W2 -wd4146], $1) # Moderate warning level, disable warning C4146 "unary minus operator applied to unsigned type, result still unsigned"
+      SECP_TRY_APPEND_CFLAGS([-external:anglebrackets -external:W0], $1) # Suppress warnings from #include <...> files
+    fi
 ])
 SECP_TRY_APPEND_DEFAULT_CFLAGS(SECP_CFLAGS)
 
@@ -155,6 +169,11 @@ AC_ARG_ENABLE(module_extrakeys,
 AC_ARG_ENABLE(module_schnorrsig,
     AS_HELP_STRING([--enable-module-schnorrsig],[enable schnorrsig module [default=no]]), [],
     [SECP_SET_DEFAULT([enable_module_schnorrsig], [no], [yes])])
+
+AC_ARG_ENABLE(module_ellswift,
+    AS_HELP_STRING([--enable-module-ellswift],[enable ElligatorSwift module (experimental)]),
+    [enable_module_ellswift=$enableval],
+    [enable_module_ellswift=no])
 
 AC_ARG_ENABLE(external_default_callbacks,
     AS_HELP_STRING([--enable-external-default-callbacks],[enable external default callback functions [default=no]]), [],
@@ -326,7 +345,9 @@ if test x"$enable_valgrind" = x"yes"; then
   SECP_INCLUDES="$SECP_INCLUDES $VALGRIND_CPPFLAGS"
 fi
 
-# Add -Werror and similar flags passed from the outside (for testing, e.g., in CI)
+# Add -Werror and similar flags passed from the outside (for testing, e.g., in CI).
+# We don't want to set the user variable CFLAGS in CI because this would disable
+# autoconf's logic for setting default CFLAGS, which we would like to test in CI.
 SECP_CFLAGS="$SECP_CFLAGS $WERROR_CFLAGS"
 
 ###
@@ -344,6 +365,10 @@ fi
 if test x"$enable_module_schnorrsig" = x"yes"; then
   AC_DEFINE(ENABLE_MODULE_SCHNORRSIG, 1, [Define this symbol to enable the schnorrsig module])
   enable_module_extrakeys=yes
+fi
+
+if test x"$enable_module_ellswift" = x"yes"; then
+  AC_DEFINE(ENABLE_MODULE_ELLSWIFT, 1, [Define this symbol to enable the ElligatorSwift module])
 fi
 
 # Test if extrakeys is set after the schnorrsig module to allow the schnorrsig
@@ -391,6 +416,7 @@ AM_CONDITIONAL([ENABLE_MODULE_ECDH], [test x"$enable_module_ecdh" = x"yes"])
 AM_CONDITIONAL([ENABLE_MODULE_RECOVERY], [test x"$enable_module_recovery" = x"yes"])
 AM_CONDITIONAL([ENABLE_MODULE_EXTRAKEYS], [test x"$enable_module_extrakeys" = x"yes"])
 AM_CONDITIONAL([ENABLE_MODULE_SCHNORRSIG], [test x"$enable_module_schnorrsig" = x"yes"])
+AM_CONDITIONAL([ENABLE_MODULE_ELLSWIFT], [test x"$enable_module_ellswift" = x"yes"])
 AM_CONDITIONAL([USE_EXTERNAL_ASM], [test x"$enable_external_asm" = x"yes"])
 AM_CONDITIONAL([USE_ASM_ARM], [test x"$set_asm" = x"arm"])
 AM_CONDITIONAL([BUILD_WINDOWS], [test "$build_windows" = "yes"])
@@ -411,6 +437,7 @@ echo "  module ecdh             = $enable_module_ecdh"
 echo "  module recovery         = $enable_module_recovery"
 echo "  module extrakeys        = $enable_module_extrakeys"
 echo "  module schnorrsig       = $enable_module_schnorrsig"
+echo "  module ellswift         = $enable_module_ellswift"
 echo
 echo "  asm                     = $set_asm"
 echo "  ecmult window size      = $set_ecmult_window"
