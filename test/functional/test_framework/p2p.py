@@ -166,6 +166,8 @@ class P2PConnection(asyncio.Protocol):
         self._transport = None
         self.v2_connection = None  # V2P2PEncryption object needed for v2 p2p connections
         self.support_v2_p2p = False  # set if the connection is v2 p2p
+        self.reconnect = False  # set if reconnection needs to happen
+        self.downgrade_connection = False # set if connection downgrade from v2 to v1 p2p happens
         self.queue_messages = []
 
     @property
@@ -195,14 +197,16 @@ class P2PConnection(asyncio.Protocol):
         coroutine = loop.create_connection(lambda: self, host=self.dstaddr, port=self.dstport)
         return lambda: loop.call_soon_threadsafe(loop.create_task, coroutine)
 
-    def peer_accept_connection(self, connect_id, connect_cb=lambda: None, *, net, timeout_factor, support_v2_p2p=False):
+    def peer_accept_connection(self, connect_id, connect_cb=lambda: None, *, net, timeout_factor, support_v2_p2p=False, advertise_v2_p2p=False):
         self.peer_connect_helper('0', 0, net, timeout_factor)
         # V2P2PEncryption object is needed when p2p connection supports v2 p2p and is advertised to support v2
         # since outbound connections are initiated by the TestNode
-        if support_v2_p2p:
+        if support_v2_p2p and advertise_v2_p2p:
             self.support_v2_p2p = True
             self.v2_connection = V2P2PEncryption(initiating=False)
 
+        # set reconnect if a p2p connection is advertised to support v2 p2p but doesn't actually support v2 p2p
+        self.reconnect = advertise_v2_p2p and not support_v2_p2p
         logger.debug('Listening for Bitcoin Node with id: {}'.format(connect_id))
         return lambda: NetworkThread.listen(self, connect_cb, idx=connect_id)
 
@@ -233,7 +237,7 @@ class P2PConnection(asyncio.Protocol):
 
     def connection_lost(self, exc):
         """asyncio callback when a connection is closed."""
-        if exc:
+        if exc and not self.reconnect:
             logger.warning("Connection lost to {}:{} due to {}".format(self.dstaddr, self.dstport, exc))
         else:
             logger.debug("Closed connection to: %s:%d" % (self.dstaddr, self.dstport))
@@ -343,7 +347,8 @@ class P2PConnection(asyncio.Protocol):
                 self._log_message("receive", t)
                 self.on_message(t)
         except Exception as e:
-            logger.exception('Error reading message:', repr(e))
+            if not self.reconnect:
+                logger.exception('Error reading message:', repr(e))
             raise
 
     def on_message(self, message):
@@ -468,7 +473,11 @@ class P2PInterface(P2PConnection):
     def peer_accept_connection(self, *args, services=P2P_SERVICES, **kwargs):
         create_conn = super().peer_accept_connection(*args, **kwargs)
         self.peer_connect_send_version(services)
-
+        # if v2 support is falsely advertised, version msg shouldn't be sent immediately
+        if self.reconnect:
+            msg = self.on_connection_send_msg
+            self.queue_messages.append(msg)
+            self.on_connection_send_msg = None
         return create_conn
 
     # Message receiving methods
@@ -542,6 +551,10 @@ class P2PInterface(P2PConnection):
 
     def on_version(self, message):
         assert message.nVersion >= MIN_P2P_VERSION_SUPPORTED, "Version {} received. Test framework only supports versions greater than {}".format(message.nVersion, MIN_P2P_VERSION_SUPPORTED)
+        if self.downgrade_connection:
+            while self.queue_messages:
+                message = self.queue_messages.pop(0)
+                self.send_message(message)
         if message.nVersion >= 70016 and self.wtxidrelay:
             self.send_message(msg_wtxidrelay())
         if self.support_addrv2:
@@ -716,6 +729,15 @@ class NetworkThread(threading.Thread):
         if addr is None:
             addr = '127.0.0.1'
 
+        def exception_handler(loop, context):
+            if not p2p.reconnect:
+                loop.default_exception_handler(context)
+            else:
+                # need to explicitly call connection_lost() callback in python 3.6 (minimum supported version)
+                if sys.version_info[0] == 3 and sys.version_info[1] == 6:
+                    p2p._transport._force_close(context['exception'])
+
+        cls.network_event_loop.set_exception_handler(exception_handler)
         coroutine = cls.create_listen_server(addr, port, callback, p2p)
         cls.network_event_loop.call_soon_threadsafe(cls.network_event_loop.create_task, coroutine)
 
@@ -729,7 +751,9 @@ class NetworkThread(threading.Thread):
             protocol function from that dict, and returns it so the event loop
             can start executing it."""
             response = cls.protos.get((addr, port))
-            cls.protos[(addr, port)] = None
+            # remove protocol function from dict only when reconnection doesn't need to happen/already happened
+            if not proto.reconnect or proto.downgrade_connection:
+                cls.protos[(addr, port)] = None
             return response
 
         if (addr, port) not in cls.listeners:
