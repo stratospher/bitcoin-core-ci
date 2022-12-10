@@ -696,6 +696,7 @@ void CNode::CopyStats(CNodeStats& stats)
 void CNode::InitV2P2P(const Span<const std::byte> their_ellswift, const Span<const std::byte> our_ellswift, bool initiating)
 {
     auto ecdh_secret = v2_priv_key.ComputeBIP324ECDHSecret(their_ellswift, our_ellswift, initiating);
+    LogPrintf("#### ECDH Secret: %s\n", HexStr(ecdh_secret.value()));
 
     BIP324Session v2_keys;
     DeriveBIP324Session(std::move(ecdh_secret.value()), v2_keys);
@@ -1690,7 +1691,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
                             memcpy(pnode->v2_garbage_bytes_recd.data() + old_size, ptr, (new_size - old_size));
                             auto it = std::search(pnode->v2_garbage_bytes_recd.begin(), pnode->v2_garbage_bytes_recd.end(),
                                                   pnode->v2_recv_garbage_terminator.begin(), pnode->v2_recv_garbage_terminator.end());
-
+                            LogPrint(BCLog::NET, "garbnage\n");
                             if (it != pnode->v2_garbage_bytes_recd.end()) {
                                 // Found the terminator...
                                 auto garbage_size = it - pnode->v2_garbage_bytes_recd.begin();
@@ -1721,6 +1722,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
                                 pnode->m_transport_type = TransportProtocolType::V2;
                                 if (!pnode->IsInboundConn()) {
                                     // Outbound peer has completed key exchange and can start the P2P protocol
+                                    LogPrint(BCLog::NET, "outbound key exchange complete\n");
                                     m_msgproc->InitP2P(*pnode, nLocalServices);
                                 }
                             }
@@ -1745,6 +1747,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
                     WakeMessageHandler();
                 }
             } else if (nBytes == 0) {
+                LogPrint(BCLog::NET, "nBytes==0\n");
                 // socket closed gracefully
                 if (!pnode->fDisconnect) {
                     LogPrint(BCLog::NET, "socket closed for peer=%d\n", pnode->GetId());
@@ -1754,6 +1757,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
                 if (pnode->PreferV2Conn() &&
                     !pnode->v2_key_exchange_complete &&
                     !pnode->IsInboundConn()) {
+                    LogPrint(BCLog::NET, "downgarde 1\n");
                     DowngradeToV1Transport(*pnode);
                 }
             } else if (nBytes < 0) {
@@ -1777,10 +1781,16 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
 
         if (InactivityCheck(*pnode)) {
             pnode->fDisconnect = true;
+            LogPrint(BCLog::NET, "pnode->PreferV2Conn()=%d\n",pnode->PreferV2Conn());
+            LogPrint(BCLog::NET, "!pnode->v2_key_exchange_complete=%d\n",!pnode->v2_key_exchange_complete);
+            LogPrint(BCLog::NET, "!pnode->IsInboundConn()=%d\n",!pnode->IsInboundConn());
+            LogPrint(BCLog::NET, "pnode->m_last_recv.load().count()==0 %d\n",pnode->m_last_recv.load().count()==0);
             if (pnode->PreferV2Conn() &&
                 !pnode->v2_key_exchange_complete &&
                 !pnode->IsInboundConn() &&
                 pnode->m_last_recv.load().count() == 0) {
+                LogPrint(BCLog::NET, "downgarde 2\n");
+                LogPrint(BCLog::NET, "pnode->m_last_recv.load().count()=%d\n",pnode->m_last_recv.load().count());
                 DowngradeToV1Transport(*pnode);
             }
         }
