@@ -243,6 +243,7 @@ BASE_SCRIPTS = [
     'p2p_v2.py',
     'p2p_v2_transport.py',
     'p2p_v2_encrypted.py',
+    'p2p_v2_earlykeyresponse.py',
     'feature_assumevalid.py',
     'example_test.py',
     'wallet_txn_doublespend.py --legacy-wallet',
