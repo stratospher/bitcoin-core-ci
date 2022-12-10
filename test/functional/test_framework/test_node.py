@@ -651,7 +651,7 @@ class TestNode():
 
         return p2p_conn
 
-    def add_outbound_p2p_connection(self, p2p_conn, *, wait_for_verack=True, p2p_idx, connection_type="outbound-full-relay", support_v2_p2p=False, **kwargs):
+    def add_outbound_p2p_connection(self, p2p_conn, *, wait_for_verack=True, p2p_idx, connection_type="outbound-full-relay", support_v2_p2p=False, advertise_v2_p2p=False, **kwargs):
         """Add an outbound p2p connection from node. Must be an
         "outbound-full-relay", "block-relay-only", "addr-fetch" or "feeler" connection.
 
@@ -661,19 +661,23 @@ class TestNode():
         p2p_idx must be different for simultaneously connected peers. When reusing it for the next peer
         after disconnecting the previous one, it is necessary to wait for the disconnect to finish to avoid
         a race condition.
+
+        Parameters:
+            support_v2_p2p: whether p2p_conn is a v2 p2p connection or not
+            advertise_v2_p2p: whether p2p_conn is advertised to support v2 p2p connection or not
         """
 
         def addconnection_callback(address, port):
             self.log.debug("Connecting to %s:%d %s" % (address, port, connection_type))
-            self.addconnection('%s:%d' % (address, port), connection_type, self.is_v2_p2p and support_v2_p2p)
+            self.addconnection('%s:%d' % (address, port), connection_type, advertise_v2_p2p)
 
-        # condition check is changed in later commit to allow false advertisement - assume both TestNode and P2PConnection is v2 for now
-        if self.is_v2_p2p and support_v2_p2p:
+        # accept a v2 outbound connection if the TestNode is a v2 node and p2p connection is advertised to support v2
+        if self.is_v2_p2p and advertise_v2_p2p:
             if 'services' not in kwargs:
                 kwargs['services'] = P2P_SERVICES|NODE_P2P_V2
             else:
                 kwargs['services'] = kwargs['services']|NODE_P2P_V2
-            p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, support_v2_p2p=support_v2_p2p, **kwargs)()
+            p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, support_v2_p2p=support_v2_p2p, advertise_v2_p2p=advertise_v2_p2p, **kwargs)()
         else:
             p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, **kwargs)()
 
