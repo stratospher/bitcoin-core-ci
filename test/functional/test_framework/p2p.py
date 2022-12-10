@@ -184,7 +184,7 @@ class P2PConnection(asyncio.Protocol):
         self.recvbuf = b""
         self.magic_bytes = MAGIC_BYTES[net]
 
-    def peer_connect(self, dstaddr, dstport, *, net, timeout_factor, support_v2_p2p=False):
+    def peer_connect(self, dstaddr, dstport, *, net, timeout_factor, support_v2_p2p=False, reconnect=False):
         self.peer_connect_helper(dstaddr, dstport, net, timeout_factor)
         # V2P2PEncryption object is needed when p2p_connection supports v2 p2p
         # since inbound connections are initiated by p2p connection
@@ -192,6 +192,7 @@ class P2PConnection(asyncio.Protocol):
             self.support_v2_p2p = True
             self.v2_connection = V2P2PEncryption(initiating=True)
 
+        self.reconnect = reconnect
         loop = NetworkThread.network_event_loop
         logger.debug('Connecting to Bitcoin Node: %s:%d' % (self.dstaddr, self.dstport))
         coroutine = loop.create_connection(lambda: self, host=self.dstaddr, port=self.dstport)
@@ -232,7 +233,9 @@ class P2PConnection(asyncio.Protocol):
                 self.queue_messages.append(self.on_connection_send_msg)
             else:
                 self.send_message(self.on_connection_send_msg)
-            self.on_connection_send_msg = None  # Never used again
+            # if reconnection needs to happen in the future, don't clear on_connection_send_msg
+            if not self.reconnect:
+                self.on_connection_send_msg = None  # Never used again
         self.on_open()
 
     def connection_lost(self, exc):
@@ -244,6 +247,16 @@ class P2PConnection(asyncio.Protocol):
         self._transport = None
         self.recvbuf = b""
         self.on_close()
+        if self.reconnect:
+            self.downgrade_connection = True
+            try:
+                if self.v2_connection.initiating:
+                    # since v2 p2p connection was unsuccessful, reconnect using v1 p2p
+                    self.support_v2_p2p = False
+                    loop = NetworkThread.network_event_loop
+                    return loop.create_task(loop.create_connection(lambda: self, host=self.dstaddr, port=self.dstport))
+            except AttributeError:
+                return
 
     # v2 handshake method
     def v2_handshake(self):

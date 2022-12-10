@@ -608,7 +608,7 @@ class TestNode():
                     assert_msg += "with expected error " + expected_msg
                 self._raise_assertion_error(assert_msg)
 
-    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, support_v2_p2p=False, **kwargs):
+    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, support_v2_p2p=False, advertise_v2_p2p=False, **kwargs):
         """Add an inbound p2p connection to the node.
 
         This method adds the p2p connection to the self.p2ps list and also
@@ -619,12 +619,14 @@ class TestNode():
             kwargs['dstaddr'] = '127.0.0.1'
 
         # condition check is changed in later commit to allow false advertisement - assume both TestNode and P2PConnection is v2 for now
-        if self.is_v2_p2p and support_v2_p2p:
+        if advertise_v2_p2p:
+            # set reconnect if a TestNode is advertised to support v2 p2p but doesn't actually support v2 p2p
+            reconnect = advertise_v2_p2p and not self.is_v2_p2p
             if 'services' not in kwargs:
                 kwargs['services'] = P2P_SERVICES|NODE_P2P_V2
             else:
                 kwargs['services'] = kwargs['services']|NODE_P2P_V2
-            p2p_conn.peer_connect(**kwargs, net=self.chain, timeout_factor=self.timeout_factor, support_v2_p2p=support_v2_p2p)()
+            p2p_conn.peer_connect(**kwargs, net=self.chain, timeout_factor=self.timeout_factor, support_v2_p2p=support_v2_p2p, reconnect=reconnect)()
         else:
             p2p_conn.peer_connect(**kwargs, net=self.chain, timeout_factor=self.timeout_factor)()
         self.p2ps.append(p2p_conn)
