@@ -278,6 +278,11 @@ class GE:
         return GE(x, y)
 
     @staticmethod
+    def is_valid_x(x):
+        """Determine whether the provided field element is a valid X coordinate."""
+        return (FE(x)**3 + 7).is_square()
+
+    @staticmethod
     def from_bytes(b):
         """Convert a compressed or uncompressed encoding to a point."""
         if len(b) == 33:
