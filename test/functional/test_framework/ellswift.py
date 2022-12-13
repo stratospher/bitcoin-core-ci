@@ -54,21 +54,36 @@ def xswiftec_inv(x, u, case):
         return None
     if case & 4:
         w = -w
-    return w * (u * (MINUS_3_SQRT + 1) / 2 + v)
+    t1 = w * (u * (MINUS_3_SQRT - 1) / 2 - v)
+    t2 = w * (u * (MINUS_3_SQRT + 1) / 2 + v)
+    t3 = w * (u * (-MINUS_3_SQRT - 1) / 2 - v)
+    t4 = w * (u * (-MINUS_3_SQRT + 1) / 2 + v)
+    return t1, t2, t3, t4
 
 def xelligatorswift(x):
     """Given a field element X on the curve, find (u, t) that encode them."""
     while True:
         u = FE(random.randrange(1, GE.ORDER))
         case = random.randrange(0, 8)
-        t = xswiftec_inv(x, u, case)
-        if t is not None:
-            return u, t
+        list_of_all_t = xswiftec_inv(x, u, case)
+        if list_of_all_t is None:
+            continue
+        print("x we start round trip with")
+        print(x)
+        t1, t2, t3, t4 = list_of_all_t
+        x1, x2, x3, x4 = xswiftec(u, t1), xswiftec(u, t2), xswiftec(u, t3), xswiftec(u, t4)
+        print("x values using xswiftec(u, [t1, t2, t3, t4])")
+        assert x2 == x4
+        print(x1)
+        print(x2)
+        print(x3)
+        print(x4)
+        return u, t1
 
 class TestFrameworkEllSwift(unittest.TestCase):
     def test_elligator_roundtrip(self):
         """Verify that encoding using xelligatorswift decodes back using xswiftec."""
-        for _ in range(32):
+        for _ in range(1):
             while True:
                 # Loop until we find a valid X coordinate on the curve.
                 x = FE(random.randrange(1, FE.SIZE))
@@ -77,4 +92,6 @@ class TestFrameworkEllSwift(unittest.TestCase):
             # Encoding it to (u, t), decode it back, and compare.
             u, t = xelligatorswift(x)
             x2 = xswiftec(u, t)
+
+            print("MINUS_3_SQRT - 1 == -1 + MINUS_3_SQRT ?", MINUS_3_SQRT - 1 == -1 + MINUS_3_SQRT)
             self.assertEqual(x2, x)
