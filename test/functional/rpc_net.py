@@ -70,6 +70,7 @@ class NetTest(BitcoinTestFramework):
         self.test_service_flags()
         self.test_getnodeaddresses()
         self.test_addpeeraddress()
+        self.test_addrmaninfo()
 
     def test_connection_count(self):
         self.log.info("Test getconnectioncount")
@@ -333,6 +334,20 @@ class NetTest(BitcoinTestFramework):
             addrs = node.getnodeaddresses(count=0)  # getnodeaddresses re-runs the addrman checks
             assert_equal(len(addrs), 2)
 
+    def test_addrmaninfo(self):
+        self.log.info("Test addrmaninfo")
+        node = self.nodes[1]
+
+        # current ipv4 count in node's Addrman: new 1, tried 1
+        self.log.debug("Test that addrmaninfo provides correct new/tried table address count")
+        node.addpeeraddress(address="1.2.3.5", tried=True, port=8333)
+        node.addpeeraddress(address="pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion", tried=True, port=8333)
+
+        res = node.addrmaninfo()
+        assert_equal(res[0]["new"], 1)
+        assert_equal(res[0]["tried"], 2)
+        assert_equal(res[2]["new"], 0)
+        assert_equal(res[2]["tried"], 1)
 
 if __name__ == '__main__':
     NetTest().main()
