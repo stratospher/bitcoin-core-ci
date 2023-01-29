@@ -975,6 +975,61 @@ static RPCHelpMan addpeeraddress()
     };
 }
 
+static RPCHelpMan addrmaninfo()
+{
+    return RPCHelpMan{"addrmaninfo",
+                      "\nReturns count of addresses in new/tried table of all networks(or a given network). This RPC is for testing only.\n",
+                      {
+                              {"network", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "Network type (" + Join(GetNetworkNames(), ", ") + ")"},
+                      },
+                      RPCResult{
+                              RPCResult::Type::ARR, "", "",
+                              {
+                                      {RPCResult::Type::OBJ, "", "",
+                                       {
+                                               {RPCResult::Type::STR, "network",  "The network (" + Join(GetNetworkNames(), ", ") + ")"},
+                                               {RPCResult::Type::NUM, "new", "number of addresses in new table"},
+                                               {RPCResult::Type::NUM, "tried", "number of addresses in tried table"},
+                                       }},
+                              }
+                      },
+                      RPCExamples{
+                              HelpExampleCli("addrmaninfo", "\"ipv4\"")
+                              + HelpExampleRpc("addrmaninfo", "\"ipv4\"")
+                      },
+                      [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+                      {
+                          NodeContext& node = EnsureAnyNodeContext(request.context);
+                          if (!node.addrman) {
+                              throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Address manager functionality missing or disabled");
+                          }
+
+                          const std::optional<Network> network{request.params[0].isNull() ? std::nullopt : std::optional<Network>{ParseNetwork(request.params[0].get_str())}};
+                          if (network == NET_UNROUTABLE) {
+                              throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Network not recognized: %s", request.params[0].get_str()));
+                          }
+                          const std::optional<bool> in_new{request.params[1].isNull() ? std::nullopt : std::optional<bool>{request.params[1].get_bool()}};
+
+                          UniValue ret(UniValue::VARR);
+                          int start_network = 0, last_network = NET_MAX;
+                          if (network.has_value()){
+                              start_network = *network;
+                              last_network = start_network + 1;
+                          }
+                          for (int n = start_network; n < last_network; ++n) {
+                              enum Network network = static_cast<enum Network>(n);
+                              if (network == NET_UNROUTABLE || network == NET_INTERNAL) continue;
+                              UniValue obj(UniValue::VOBJ);
+                              obj.pushKV("network", GetNetworkName(network));
+                              obj.pushKV("new", node.addrman->Size(network, true));
+                              obj.pushKV("tried", node.addrman->Size(network, false));
+                              ret.push_back(obj);
+                          }
+                          return ret;
+                      },
+    };
+}
+
 void RegisterNetRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -993,6 +1048,7 @@ void RegisterNetRPCCommands(CRPCTable& t)
         {"network", &getnodeaddresses},
         {"hidden", &addconnection},
         {"hidden", &addpeeraddress},
+        {"hidden", &addrmaninfo},
     };
     for (const auto& c : commands) {
         t.appendCommand(c.name, &c);

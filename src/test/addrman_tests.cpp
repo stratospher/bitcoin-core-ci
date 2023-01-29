@@ -8,6 +8,7 @@
 #include <chainparams.h>
 #include <clientversion.h>
 #include <hash.h>
+#include <netaddress.h>
 #include <netbase.h>
 #include <random.h>
 #include <test/data/asmap.raw.h>
