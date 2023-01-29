@@ -252,46 +252,30 @@ public:
 /** Process addrinfo requests */
 class AddrinfoRequestHandler : public BaseRequestHandler
 {
-private:
-    int8_t NetworkStringToId(const std::string& str) const
-    {
-        for (size_t i = 0; i < NETWORKS.size(); ++i) {
-            if (str == NETWORKS[i]) return i;
-        }
-        return UNKNOWN_NETWORK;
-    }
-
 public:
     UniValue PrepareRequest(const std::string& method, const std::vector<std::string>& args) override
     {
         if (!args.empty()) {
             throw std::runtime_error("-addrinfo takes no arguments");
         }
-        UniValue params{RPCConvertValues("getnodeaddresses", std::vector<std::string>{{"0"}})};
-        return JSONRPCRequestObj("getnodeaddresses", params, 1);
+        return JSONRPCRequestObj("addrmaninfo", NullUniValue, 1); //todo: is 0 ok?
     }
 
     UniValue ProcessReply(const UniValue& reply) override
     {
         if (!reply["error"].isNull()) return reply;
-        const std::vector<UniValue>& nodes{reply["result"].getValues()};
-        if (!nodes.empty() && nodes.at(0)["network"].isNull()) {
+        const std::vector<UniValue>& addrman{reply["result"].getValues()};
+        if (!addrman.empty() && addrman.at(0)["network"].isNull()) {
             throw std::runtime_error("-addrinfo requires bitcoind server to be running v22.0 and up");
         }
-        // Count the number of peers known to our node, by network.
-        std::array<uint64_t, NETWORKS.size()> counts{{}};
-        for (const UniValue& node : nodes) {
-            std::string network_name{node["network"].get_str()};
-            const int8_t network_id{NetworkStringToId(network_name)};
-            if (network_id == UNKNOWN_NETWORK) continue;
-            ++counts.at(network_id);
-        }
+
         // Prepare result to return to user.
         UniValue result{UniValue::VOBJ}, addresses{UniValue::VOBJ};
         uint64_t total{0}; // Total address count
-        for (size_t i = 0; i < NETWORKS.size(); ++i) {
-            addresses.pushKV(NETWORKS[i], counts.at(i));
-            total += counts.at(i);
+        for (const UniValue& net_addrman : addrman) {
+            uint64_t addr_count = net_addrman["new"].getInt<int>() + net_addrman["tried"].getInt<int>();
+            addresses.pushKV(net_addrman["network"].get_str(), addr_count);
+            total += addr_count;
         }
         addresses.pushKV("total", total);
         result.pushKV("addresses_known", addresses);
