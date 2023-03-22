@@ -44,6 +44,10 @@ const std::vector<std::string> CONNECTION_TYPE_DOC{
         "feeler (short-lived automatic connection for testing addresses)"
 };
 
+const std::vector<std::string> TRANSPORT_TYPE_DOC{
+    "v1 (plaintext transport protocol)",
+    "v2 (BIP324 encrypted transport protocol)"};
+
 static RPCHelpMan getconnectioncount()
 {
     return RPCHelpMan{"getconnectioncount",
@@ -163,6 +167,8 @@ static RPCHelpMan getpeerinfo()
                     {RPCResult::Type::STR, "connection_type", "Type of connection: \n" + Join(CONNECTION_TYPE_DOC, ",\n") + ".\n"
                                                               "Please note this output is unlikely to be stable in upcoming releases as we iterate to\n"
                                                               "best capture connection behaviors."},
+                    {RPCResult::Type::STR, "transport_protocol_type", "Type of transport protocol: \n" + Join(TRANSPORT_TYPE_DOC, ",\n") + ".\n"},
+                    {RPCResult::Type::STR, "v2_session_id", /* optional */ true, "BIP324 session id for an encrypted v2 connection.\n"},
                 }},
             }},
         },
@@ -267,6 +273,10 @@ static RPCHelpMan getpeerinfo()
         }
         obj.pushKV("bytesrecv_per_msg", recvPerMsgType);
         obj.pushKV("connection_type", ConnectionTypeAsString(stats.m_conn_type));
+        obj.pushKV("transport_protocol_type", TransportTypeAsString(stats.m_transport_type));
+        if (stats.m_transport_type == TransportProtocolType::V2) {
+            obj.pushKV("v2_session_id", stats.m_v2_session_id);
+        }
 
         ret.push_back(obj);
     }
@@ -288,11 +298,12 @@ static RPCHelpMan addnode()
                 {
                     {"node", RPCArg::Type::STR, RPCArg::Optional::NO, "The node (see getpeerinfo for nodes)"},
                     {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "'add' to add a node to the list, 'remove' to remove a node from the list, 'onetry' to try a connection to the node once"},
+                    {"p2p_v2", RPCArg::Type::BOOL, RPCArg::Default{false}, "Peer supports BIP324 v2 transport protocol"},
                 },
                 RPCResult{RPCResult::Type::NONE, "", ""},
                 RPCExamples{
-                    HelpExampleCli("addnode", "\"192.168.0.6:8333\" \"onetry\"")
-            + HelpExampleRpc("addnode", "\"192.168.0.6:8333\", \"onetry\"")
+                    HelpExampleCli("addnode", "\"192.168.0.6:8333\" \"onetry\" true")
+            + HelpExampleRpc("addnode", "\"192.168.0.6:8333\", \"onetry\" true")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -308,17 +319,21 @@ static RPCHelpMan addnode()
     CConnman& connman = EnsureConnman(node);
 
     std::string strNode = request.params[0].get_str();
+    bool use_p2p_v2 = !request.params[2].isNull() && request.params[2].get_bool();
 
     if (strCommand == "onetry")
     {
         CAddress addr;
+        if (use_p2p_v2) {
+            addr.nServices = ServiceFlags(addr.nServices | NODE_P2P_V2);
+        }
         connman.OpenNetworkConnection(addr, false, nullptr, strNode.c_str(), ConnectionType::MANUAL);
         return UniValue::VNULL;
     }
 
     if (strCommand == "add")
     {
-        if (!connman.AddNode(strNode)) {
+        if (!connman.AddNode({strNode, use_p2p_v2})) {
             throw JSONRPCError(RPC_CLIENT_NODE_ALREADY_ADDED, "Error: Node already added");
         }
     }
@@ -476,7 +491,7 @@ static RPCHelpMan getaddednodeinfo()
     if (!request.params[0].isNull()) {
         bool found = false;
         for (const AddedNodeInfo& info : vInfo) {
-            if (info.strAddedNode == request.params[0].get_str()) {
+            if (info.m_params.m_added_node == request.params[0].get_str()) {
                 vInfo.assign(1, info);
                 found = true;
                 break;
@@ -491,7 +506,7 @@ static RPCHelpMan getaddednodeinfo()
 
     for (const AddedNodeInfo& info : vInfo) {
         UniValue obj(UniValue::VOBJ);
-        obj.pushKV("addednode", info.strAddedNode);
+        obj.pushKV("addednode", info.m_params.m_added_node);
         obj.pushKV("connected", info.fConnected);
         UniValue addresses(UniValue::VARR);
         if (info.fConnected) {

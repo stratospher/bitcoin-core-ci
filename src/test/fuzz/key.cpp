@@ -15,13 +15,19 @@
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
+#include <secp256k1.h>
+#include <secp256k1_ellswift.h>
 #include <streams.h>
+#include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <util/strencodings.h>
 
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -302,4 +308,87 @@ FUZZ_TARGET_INIT(key, initialize_key)
             assert(key == loaded_key);
         }
     }
+}
+
+std::optional<std::array<std::byte, 64>> GetEll64(const CPubKey& pubkey) {
+    std::array<std::byte, 64> ell64;
+
+    auto ctx = secp256k1_context_static;
+    secp256k1_pubkey pubkey_internal;
+    if (!secp256k1_ec_pubkey_parse(ctx, &pubkey_internal, pubkey.data(), pubkey.size())) {
+        return {};
+    }
+
+    std::array<unsigned char, 32> rnd32;
+    GetRandBytes(rnd32);
+    secp256k1_ellswift_encode(ctx, reinterpret_cast<unsigned char*>(ell64.data()), &pubkey_internal, rnd32.data());
+    return ell64;
+}
+
+FUZZ_TARGET_INIT(bip324_ecdh, initialize_key)
+{
+    FuzzedDataProvider fdp{buffer.data(), buffer.size()};
+    auto rnd32 = fdp.ConsumeBytes<uint8_t>(32);
+    rnd32.resize(32);
+    CKey k1;
+    k1.Set(rnd32.begin(), rnd32.end(), true);
+
+    if (!k1.IsValid()) {
+        return;
+    }
+
+    rnd32 = fdp.ConsumeBytes<uint8_t>(32);
+    rnd32.resize(32);
+    CKey k2;
+    k2.Set(rnd32.begin(), rnd32.end(), true);
+
+    if (!k2.IsValid()) {
+        return;
+    }
+
+    auto k1_ellswift = GetEll64(k1.GetPubKey());
+    auto k2_ellswift = GetEll64(k2.GetPubKey());
+    assert(k1_ellswift.has_value() && k2_ellswift.has_value());
+
+    bool initiating = fdp.ConsumeBool();
+    auto ecdh_secret_1 = k1.ComputeBIP324ECDHSecret(k2_ellswift.value(), k1_ellswift.value(), initiating);
+    auto ecdh_secret_2 = k2.ComputeBIP324ECDHSecret(k1_ellswift.value(), k2_ellswift.value(), !initiating);
+    assert(ecdh_secret_1.value() == ecdh_secret_2.value());
+}
+
+CPubKey EllSwiftDecode(const EllSwiftPubKey& encoded_pubkey)
+{
+    secp256k1_pubkey pubkey;
+    secp256k1_ellswift_decode(secp256k1_context_static, &pubkey, reinterpret_cast<const unsigned char*>(encoded_pubkey.data()));
+
+    size_t sz = CPubKey::COMPRESSED_SIZE;
+    std::array<uint8_t, CPubKey::COMPRESSED_SIZE> vch_bytes;
+
+    secp256k1_ec_pubkey_serialize(secp256k1_context_static, vch_bytes.data(), &sz, &pubkey, SECP256K1_EC_COMPRESSED);
+
+    return CPubKey{vch_bytes.begin(), vch_bytes.end()};
+}
+
+FUZZ_TARGET_INIT(ellswift, initialize_key)
+{
+    FuzzedDataProvider fdp{buffer.data(), buffer.size()};
+    auto key_bytes = fdp.ConsumeBytes<uint8_t>(32);
+    key_bytes.resize(32);
+    CKey key;
+    key.Set(key_bytes.begin(), key_bytes.end(), fdp.ConsumeBool());
+    if (!key.IsValid()) {
+        return;
+    }
+
+    auto r32_vec = fdp.ConsumeBytes<std::byte>(32);
+    r32_vec.resize(32);
+    std::array<std::byte, 32> rnd32;
+    memcpy(rnd32.data(), r32_vec.data(), r32_vec.size());
+
+    auto encoded_ellswift = key.EllSwiftEncode(rnd32);
+    auto decoded_pubkey = EllSwiftDecode(encoded_ellswift);
+    if (!key.IsCompressed()) {
+        decoded_pubkey.Decompress();
+    }
+    assert(key.VerifyPubKey(decoded_pubkey));
 }
