@@ -9,8 +9,11 @@
 #include <crypto/hmac_sha512.h>
 #include <hash.h>
 #include <random.h>
+#include <support/cleanse.h>
+#include <span.h>
 
 #include <secp256k1.h>
+#include <secp256k1_ellswift.h>
 #include <secp256k1_extrakeys.h>
 #include <secp256k1_recovery.h>
 #include <secp256k1_schnorrsig.h>
@@ -329,6 +332,55 @@ bool CKey::Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const
     keyChild.fCompressed = true;
     keyChild.fValid = ret;
     return ret;
+}
+
+// Returns just the x-coordinate in big endian
+static int bip324_ecdh_hash(unsigned char* output, const unsigned char* x32, const unsigned char* ours, const unsigned char* theirs, void* data)
+{
+    memcpy(output, x32, 32);
+    return 1;
+}
+
+std::optional<ECDHSecret> CKey::ComputeBIP324ECDHSecret(const Span<const std::byte> their_ellswift,
+                                                        const Span<const std::byte> our_ellswift,
+                                                        bool initiating) const
+{
+    unsigned char xonly_ecdh[ECDH_SECRET_SIZE];
+    if (!secp256k1_ellswift_xdh(secp256k1_context_sign, xonly_ecdh, reinterpret_cast<const unsigned char*>(their_ellswift.data()), reinterpret_cast<const unsigned char*>(our_ellswift.data()), keydata.data(), bip324_ecdh_hash, nullptr)) {
+        return {};
+    }
+
+    HashWriter hasher(HASHER_BIP324_ECDH);
+    Span<const std::byte> initiator_ellswift, responder_ellswift;
+    if (initiating) {
+        initiator_ellswift = our_ellswift;
+        responder_ellswift = their_ellswift;
+    } else {
+        initiator_ellswift = their_ellswift;
+        responder_ellswift = our_ellswift;
+    }
+    hasher << MakeUCharSpan(initiator_ellswift) << MakeUCharSpan(responder_ellswift) << xonly_ecdh;
+    auto secret_uint256 = hasher.GetSHA256();
+
+    ECDHSecret secret;
+    memcpy(secret.data(), &secret_uint256, CSHA256::OUTPUT_SIZE);
+    memory_cleanse(xonly_ecdh, ECDH_SECRET_SIZE);
+    return secret;
+}
+
+EllSwiftPubKey CKey::EllSwiftEncode(const std::array<std::byte, 32>& rnd32) const
+{
+    assert(fValid);
+    EllSwiftPubKey encoded_pubkey;
+
+    auto success = secp256k1_ellswift_create(secp256k1_context_sign,
+                                             reinterpret_cast<unsigned char*>(encoded_pubkey.data()),
+                                             keydata.data(),
+                                             UCharCast(rnd32.data()));
+
+    // Should always succeed for valid keys (asserted above)
+    assert(success);
+    return encoded_pubkey;
 }
 
 bool CExtKey::Derive(CExtKey &out, unsigned int _nChild) const {

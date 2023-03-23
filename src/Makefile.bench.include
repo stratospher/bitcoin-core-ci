@@ -18,10 +18,11 @@ bench_bench_bitcoin_SOURCES = \
   bench/bench.cpp \
   bench/bench.h \
   bench/bench_bitcoin.cpp \
+  bench/bip324_ecdh.cpp \
+  bench/bip324_suite.cpp \
   bench/block_assemble.cpp \
   bench/ccoins_caching.cpp \
   bench/chacha20.cpp \
-  bench/chacha_poly_aead.cpp \
   bench/checkblock.cpp \
   bench/checkqueue.cpp \
   bench/crypto_hash.cpp \
@@ -29,6 +30,7 @@ bench_bench_bitcoin_SOURCES = \
   bench/data.h \
   bench/descriptors.cpp \
   bench/duplicate_inputs.cpp \
+  bench/ellswift.cpp \
   bench/examples.cpp \
   bench/gcs_filter.cpp \
   bench/hashpadding.cpp \
@@ -43,6 +45,7 @@ bench_bench_bitcoin_SOURCES = \
   bench/peer_eviction.cpp \
   bench/poly1305.cpp \
   bench/prevector.cpp \
+  bench/rfc8439.cpp \
   bench/rollingbloom.cpp \
   bench/rpc_blockchain.cpp \
   bench/rpc_mempool.cpp \

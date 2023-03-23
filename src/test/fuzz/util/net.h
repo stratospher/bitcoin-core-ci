@@ -110,6 +110,7 @@ auto ConsumeNode(FuzzedDataProvider& fuzzed_data_provider, const std::optional<N
     const ConnectionType conn_type = fuzzed_data_provider.PickValueInArray(ALL_CONNECTION_TYPES);
     const bool inbound_onion{conn_type == ConnectionType::INBOUND ? fuzzed_data_provider.ConsumeBool() : false};
     NetPermissionFlags permission_flags = ConsumeWeakEnum(fuzzed_data_provider, ALL_NET_PERMISSION_FLAGS);
+    const bool prefer_p2p_v2{fuzzed_data_provider.ConsumeBool()};
     if constexpr (ReturnUniquePtr) {
         return std::make_unique<CNode>(node_id,
                                        sock,
@@ -120,7 +121,8 @@ auto ConsumeNode(FuzzedDataProvider& fuzzed_data_provider, const std::optional<N
                                        addr_name,
                                        conn_type,
                                        inbound_onion,
-                                       CNodeOptions{ .permission_flags = permission_flags });
+                                       CNodeOptions{.permission_flags = permission_flags,
+                                                    .prefer_p2p_v2 = prefer_p2p_v2});
     } else {
         return CNode{node_id,
                      sock,
@@ -131,11 +133,14 @@ auto ConsumeNode(FuzzedDataProvider& fuzzed_data_provider, const std::optional<N
                      addr_name,
                      conn_type,
                      inbound_onion,
-                     CNodeOptions{ .permission_flags = permission_flags }};
+                     CNodeOptions{.permission_flags = permission_flags,
+                                  .prefer_p2p_v2 = prefer_p2p_v2}};
     }
 }
 inline std::unique_ptr<CNode> ConsumeNodeAsUniquePtr(FuzzedDataProvider& fdp, const std::optional<NodeId>& node_id_in = std::nullopt) { return ConsumeNode<true>(fdp, node_id_in); }
 
 void FillNode(FuzzedDataProvider& fuzzed_data_provider, ConnmanTestMsg& connman, CNode& node) noexcept EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
+
+void InitTestV2P2P(FuzzedDataProvider& fuzzed_data_provider, CNode& p2p_node, ConnmanTestMsg& connman) noexcept;
 
 #endif // BITCOIN_TEST_FUZZ_UTIL_NET_H

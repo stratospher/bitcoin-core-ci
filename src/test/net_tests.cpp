@@ -2,10 +2,15 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <test/data/bip324_vectors.json.h>
+
 #include <chainparams.h>
 #include <clientversion.h>
 #include <compat/compat.h>
+#include <crypto/bip324_suite.h>
 #include <cstdint>
+#include <key.h>
+#include <key_io.h>
 #include <net.h>
 #include <net_processing.h>
 #include <netaddress.h>
@@ -30,6 +35,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+
+#include <univalue.h>
 
 using namespace std::literals;
 
@@ -905,4 +912,268 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     TestOnlyResetTimeData();
 }
 
+void message_serialize_deserialize_test(bool v2, const std::vector<CSerializedNetMsg>& test_msgs)
+{
+    // use keys with all zeros
+    BIP324Key key_L, key_P;
+    memset(key_L.data(), 1, BIP324_KEY_LEN);
+    memset(key_P.data(), 2, BIP324_KEY_LEN);
+
+    // construct the serializers
+    std::unique_ptr<TransportSerializer> serializer;
+    std::unique_ptr<TransportDeserializer> deserializer;
+
+    if (v2) {
+        serializer = std::make_unique<V2TransportSerializer>(V2TransportSerializer(key_L, key_P));
+        deserializer = std::make_unique<V2TransportDeserializer>(V2TransportDeserializer((NodeId)0, key_L, key_P));
+    } else {
+        serializer = std::make_unique<V1TransportSerializer>(V1TransportSerializer());
+        deserializer = std::make_unique<V1TransportDeserializer>(V1TransportDeserializer(Params(), (NodeId)0, SER_NETWORK, INIT_PROTO_VERSION));
+    }
+    // run 100 times through all messages with the same cipher suite instances
+    for (unsigned int i = 0; i < 100; i++) {
+        for (size_t msg_index = 0; msg_index < test_msgs.size(); msg_index++) {
+            const CSerializedNetMsg& msg_orig = test_msgs[msg_index];
+            // bypass the copy protection
+            CSerializedNetMsg msg;
+            msg.data = msg_orig.data;
+            msg.m_type = msg_orig.m_type;
+
+            std::vector<unsigned char> serialized_header;
+            serializer->prepareForTransport(msg, serialized_header);
+
+            // read two times
+            //  first: read header
+            size_t read_bytes{0};
+            Span<const uint8_t> span_header(serialized_header.data(), serialized_header.size());
+            if (serialized_header.size() > 0) read_bytes += deserializer->Read(span_header);
+            //  second: read the encrypted payload (if required)
+            Span<const uint8_t> span_msg(msg.data.data(), msg.data.size());
+            if (msg.data.size() > 0) read_bytes += deserializer->Read(span_msg);
+            if (msg.data.size() > read_bytes) {
+                Span<const uint8_t> span_msg(msg.data.data() + read_bytes, msg.data.size() - read_bytes);
+                read_bytes += deserializer->Read(span_msg);
+            }
+            // message must be complete
+            BOOST_CHECK(deserializer->Complete());
+            BOOST_CHECK_EQUAL(read_bytes, msg.data.size() + serialized_header.size());
+
+            bool reject_message{true};
+            bool disconnect{true};
+            CNetMessage result{deserializer->GetMessage(GetTime<std::chrono::microseconds>(), reject_message, disconnect, {})};
+            // The first v2 message is reject by V2TransportDeserializer as a placeholder for transport version messages
+            BOOST_CHECK(!v2 || (i == 0 && msg_index == 0) || !reject_message);
+            BOOST_CHECK(!disconnect);
+            if (reject_message) continue;
+            BOOST_CHECK_EQUAL(result.m_type, msg_orig.m_type);
+            BOOST_CHECK_EQUAL(result.m_message_size, msg_orig.data.size());
+            if (!msg_orig.data.empty()) {
+                BOOST_CHECK_EQUAL(0, memcmp(result.m_recv.data(), msg_orig.data.data(), msg_orig.data.size()));
+            }
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(net_v2)
+{
+    // create some messages where we perform serialization and deserialization
+    std::vector<CSerializedNetMsg> test_msgs;
+    test_msgs.push_back(CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERACK));
+    test_msgs.push_back(CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERSION, PROTOCOL_VERSION, (int)NODE_NETWORK, 123, CAddress(CService(), NODE_NONE), CAddress(CService(), NODE_NONE), 123, "foobar", 500000, true));
+    test_msgs.push_back(CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::PING, 123456));
+    CDataStream stream(ParseHex("020000000001013107ca31e1950a9b44b75ce3e8f30127e4d823ed8add1263a1cc8adcc8e49164000000001716001487835ecf51ea0351ef266d216a7e7a3e74b84b4efeffffff02082268590000000017a9144a94391b99e672b03f56d3f60800ef28bc304c4f8700ca9a3b0000000017a9146d5df9e79f752e3c53fc468db89cafda4f7d00cb87024730440220677de5b11a5617d541ba06a1fa5921ab6b4509f8028b23f18ab8c01c5eb1fcfb02202fe382e6e87653f60ff157aeb3a18fc888736720f27ced546b0b77431edabdb0012102608c772598e9645933a86bcd662a3b939e02fb3e77966c9713db5648d5ba8a0006010000"), SER_NETWORK, PROTOCOL_VERSION);
+    test_msgs.push_back(CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::TX, CTransaction(deserialize, stream)));
+    std::vector<CInv> vInv;
+    for (unsigned int i = 0; i < 1000; i++) {
+        vInv.push_back(CInv(MSG_BLOCK, Params().GenesisBlock().GetHash()));
+    }
+    test_msgs.push_back(CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::INV, vInv));
+
+    // add a dummy message
+    std::string dummy;
+    for (unsigned int i = 0; i < 100; i++) {
+        dummy += "020000000001013107ca31e1950a9b44b75ce3e8f30127e4d823ed8add1263a1cc8adcc8e49164000000001716001487835ecf51ea0351ef266d216a7e7a3e74b84b4efeffffff02082268590000000017a9144a94391b99e672b03f56d3f60800ef28bc304c4f8700ca9a3b0000000017a9146d5df9e79f752e3c53fc468db89cafda4f7d00cb87024730440220677de5b11a5617d541ba06a1fa5921ab6b4509f8028b23f18ab8c01c5eb1fcfb02202fe382e6e87653f60ff157aeb3a18fc888736720f27ced546b0b77431edabdb0012102608c772598e9645933a86bcd662a3b939e02fb3e77966c9713db5648d5ba8a0006010000";
+    }
+    test_msgs.push_back(CNetMsgMaker(INIT_PROTO_VERSION).Make("foobar", dummy));
+
+    message_serialize_deserialize_test(true, test_msgs);
+    message_serialize_deserialize_test(false, test_msgs);
+}
+
+BOOST_AUTO_TEST_CASE(bip324_derivation_test)
+{
+    // BIP324 key derivation uses network magic in the HKDF process. We use mainnet
+    // params here to make it easier for other implementors to use this test as a test vector.
+    SelectParams(CBaseChainParams::MAIN);
+    static const std::string strSecret1 = "5HxWvvfubhXpYYpS3tJkw6fq9jE9j18THftkZjHHfmFiWtmAbrj";
+    static const std::string strSecret2C = "L3Hq7a8FEQwJkW1M2GNKDW28546Vp5miewcCzSqUD9kCAXrJdS3g";
+    static const std::string initiator_ellswift_str = "b654960dff0ba8808a34337f46cc68ba7619c9df76d0550639dea62de07d17f9cb61b85f2897834ce12c50b1aefa281944abf2223a5fcf0a2a7d8c022498db35";
+    static const std::string responder_ellswift_str = "ea57aae33e8dd38380c303fb561b741293ef97c780445184cabdb5ef207053db628f2765e5d770f666738112c94714991362f6643d9837e1c89cbd9710b80929";
+
+    auto initiator_ellswift = ParseHex(initiator_ellswift_str);
+    auto responder_ellswift = ParseHex(responder_ellswift_str);
+
+    CKey initiator_key = DecodeSecret(strSecret1);
+    CKey responder_key = DecodeSecret(strSecret2C);
+
+    auto initiator_secret = initiator_key.ComputeBIP324ECDHSecret(MakeByteSpan(responder_ellswift), MakeByteSpan(initiator_ellswift), true);
+    BOOST_CHECK(initiator_secret.has_value());
+    auto responder_secret = responder_key.ComputeBIP324ECDHSecret(MakeByteSpan(initiator_ellswift), MakeByteSpan(responder_ellswift), false);
+    BOOST_CHECK(responder_secret.has_value());
+    BOOST_CHECK(initiator_secret.value() == responder_secret.value());
+    BOOST_CHECK_EQUAL("85ac83c8b2cd328293d49b9ed999d9eff79847e767a6252dc17ae248b0040de0", HexStr(initiator_secret.value()));
+    BOOST_CHECK_EQUAL("85ac83c8b2cd328293d49b9ed999d9eff79847e767a6252dc17ae248b0040de0", HexStr(responder_secret.value()));
+
+    BIP324Session initiator_session, responder_session;
+
+    DeriveBIP324Session(std::move(initiator_secret.value()), initiator_session);
+    DeriveBIP324Session(std::move(responder_secret.value()), responder_session);
+
+    BOOST_CHECK(initiator_session.initiator_L == responder_session.initiator_L);
+    BOOST_CHECK_EQUAL("6bb300568ba8c0e19d78a0615854748ca675448e402480f3f260a8ccf808335a", HexStr(initiator_session.initiator_L));
+
+    BOOST_CHECK(initiator_session.initiator_P == responder_session.initiator_P);
+    BOOST_CHECK_EQUAL("128962f7dc651d92a9f4f4925bbf4a58f77624d80b9234171a9b7d1ab15f5c05", HexStr(initiator_session.initiator_P));
+
+    BOOST_CHECK(initiator_session.responder_L == responder_session.responder_L);
+    BOOST_CHECK_EQUAL("e3a471e934b306015cb33727ccdc3c458960792d48d2207e14b5b0b88fd464c2", HexStr(initiator_session.responder_L));
+
+    BOOST_CHECK(initiator_session.responder_P == responder_session.responder_P);
+    BOOST_CHECK_EQUAL("1b251c795df35bda9351f3b027834517974fc2a092b450e5bf99152ebf159746", HexStr(initiator_session.responder_P));
+
+    BOOST_CHECK(initiator_session.session_id == responder_session.session_id);
+    BOOST_CHECK_EQUAL("e7047d2a41c8f040ea7f278fbf03e40b40d70ed3d555b6edb163d91af518cf6b", HexStr(initiator_session.session_id));
+
+    BOOST_CHECK(initiator_session.initiator_garbage_terminator == responder_session.initiator_garbage_terminator);
+    BOOST_CHECK_EQUAL("00fdde2e0174d8abcfba3ed0c3d31600", HexStr(initiator_session.initiator_garbage_terminator));
+
+    BOOST_CHECK(initiator_session.responder_garbage_terminator == responder_session.responder_garbage_terminator);
+    BOOST_CHECK_EQUAL("6fad393127f7a80c23e5e08d203dfe3d", HexStr(initiator_session.responder_garbage_terminator));
+
+    SelectParams(CBaseChainParams::REGTEST);
+}
+
+void assert_bip324_test_vector(uint16_t in_idx,
+                               const std::string& in_priv_ours_hex,
+                               const std::string& in_ellswift_ours_hex,
+                               const std::string& in_ellswift_theirs_hex,
+                               bool in_initiating,
+                               const std::string& in_contents_hex,
+                               uint32_t in_multiply,
+                               const std::string& in_aad_hex,
+                               bool in_ignore,
+                               const std::string& mid_shared_secret_hex,
+                               const std::string& mid_initiator_L_hex,
+                               const std::string& mid_initiator_P_hex,
+                               const std::string& mid_responder_L_hex,
+                               const std::string& mid_responder_P_hex,
+                               const std::string& out_session_id_hex,
+                               const std::string& mid_send_garbage_terminator_hex,
+                               const std::string& mid_recv_garbage_terminator_hex,
+                               const std::string& out_ciphertext_hex,
+                               const std::string& out_ciphertext_endswith_hex)
+{
+    auto parsed_hex = ParseHex(in_priv_ours_hex);
+
+    CKey in_priv_ours;
+    in_priv_ours.Set(parsed_hex.begin(), parsed_hex.end(), false);
+
+    EllSwiftPubKey in_ellswift_ours, in_ellswift_theirs;
+
+    parsed_hex = ParseHex(in_ellswift_ours_hex);
+    memcpy(in_ellswift_ours.data(), parsed_hex.data(), parsed_hex.size());
+    parsed_hex = ParseHex(in_ellswift_theirs_hex);
+    memcpy(in_ellswift_theirs.data(), parsed_hex.data(), parsed_hex.size());
+
+    std::vector<std::byte> in_contents;
+    auto contents_bytes = ParseHex<std::byte>(in_contents_hex);
+    for (size_t i = 0; i < in_multiply; i++) {
+        std::copy(contents_bytes.begin(), contents_bytes.end(), std::back_inserter(in_contents));
+    }
+
+    auto in_aad = ParseHex<std::byte>(in_aad_hex);
+
+    BIP324HeaderFlags flags{BIP324_NONE};
+    if (in_ignore) {
+        flags = BIP324_IGNORE;
+    }
+
+    auto shared_secret = in_priv_ours.ComputeBIP324ECDHSecret(in_ellswift_theirs,
+                                                              in_ellswift_ours,
+                                                              in_initiating);
+    BOOST_CHECK_EQUAL(HexStr(shared_secret.value()), mid_shared_secret_hex);
+
+    BIP324Session session;
+    DeriveBIP324Session(std::move(shared_secret.value()), session);
+
+    BOOST_CHECK_EQUAL(HexStr(session.initiator_L), mid_initiator_L_hex);
+    BOOST_CHECK_EQUAL(HexStr(session.initiator_P), mid_initiator_P_hex);
+    BOOST_CHECK_EQUAL(HexStr(session.responder_L), mid_responder_L_hex);
+    BOOST_CHECK_EQUAL(HexStr(session.responder_P), mid_responder_P_hex);
+    BOOST_CHECK_EQUAL(HexStr(session.session_id), out_session_id_hex);
+
+    std::unique_ptr<BIP324CipherSuite> suite;
+    if (in_initiating) {
+        BOOST_CHECK_EQUAL(HexStr(session.initiator_garbage_terminator), mid_send_garbage_terminator_hex);
+        BOOST_CHECK_EQUAL(HexStr(session.responder_garbage_terminator), mid_recv_garbage_terminator_hex);
+        suite = std::make_unique<BIP324CipherSuite>(session.initiator_L, session.initiator_P);
+
+    } else {
+        BOOST_CHECK_EQUAL(HexStr(session.responder_garbage_terminator), mid_send_garbage_terminator_hex);
+        BOOST_CHECK_EQUAL(HexStr(session.initiator_garbage_terminator), mid_recv_garbage_terminator_hex);
+        suite = std::make_unique<BIP324CipherSuite>(session.responder_L, session.responder_P);
+    }
+
+    std::vector<std::byte> ciphertext(V2_MIN_PACKET_LENGTH + in_contents.size());
+    std::array<std::byte, V2_MIN_PACKET_LENGTH> throwaway_ct;
+
+    for (auto i = 0; i < in_idx; i++) {
+        BOOST_CHECK(suite->Crypt({}, {}, throwaway_ct, flags, true));
+    }
+
+    BOOST_CHECK(suite->Crypt(in_aad, in_contents, ciphertext, flags, true));
+    if (!out_ciphertext_hex.empty()) {
+        BOOST_CHECK_EQUAL(HexStr(ciphertext), out_ciphertext_hex);
+    }
+
+    if (!out_ciphertext_endswith_hex.empty()) {
+        auto ciphertext_endswith_hex = HexStr(
+            MakeUCharSpan(ciphertext).last(out_ciphertext_endswith_hex.size() / 2));
+        BOOST_CHECK_EQUAL(ciphertext_endswith_hex, out_ciphertext_endswith_hex);
+    }
+}
+
+
+BOOST_AUTO_TEST_CASE(bip324_vectors_test)
+{
+    // BIP324 key derivation uses network magic in the HKDF derivation process.
+    SelectParams(CBaseChainParams::MAIN);
+
+    UniValue tests;
+    tests.read((const char*)json_tests::bip324_vectors, sizeof(json_tests::bip324_vectors));
+    for (const auto& vec : tests.getValues()) {
+        assert_bip324_test_vector(
+            vec["in_idx"].getInt<uint16_t>(),
+            vec["in_priv_ours"].get_str(),
+            vec["in_ellswift_ours"].get_str(),
+            vec["in_ellswift_theirs"].get_str(),
+            vec["in_initiating"].getInt<uint8_t>() == 0 ? false : true,
+            vec["in_contents"].get_str(),
+            vec["in_multiply"].getInt<uint32_t>(),
+            vec["in_aad"].get_str(),
+            vec["in_ignore"].getInt<uint8_t>() == 0 ? false : true,
+            vec["mid_shared_secret"].get_str(),
+            vec["mid_initiator_l"].get_str(),
+            vec["mid_initiator_p"].get_str(),
+            vec["mid_responder_l"].get_str(),
+            vec["mid_responder_p"].get_str(),
+            vec["out_session_id"].get_str(),
+            vec["mid_send_garbage_terminator"].get_str(),
+            vec["mid_recv_garbage_terminator"].get_str(),
+            vec["out_ciphertext"].get_str(),
+            vec["out_ciphertext_endswith"].get_str());
+    }
+
+    SelectParams(CBaseChainParams::REGTEST);
+}
 BOOST_AUTO_TEST_SUITE_END()
